@@ -81,9 +81,22 @@
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
+    openAgent: null,
     // 当前列表展示所用的数据源（区间 or 选中日期）
     rankModels: null,
     rankProjects: null,
+    // 新维度：agent / 首轮 / 会话归并
+    agentSort: localStorage.getItem("mimo-ts-agent-sort") || "tokens",
+    agentLimit: Number(localStorage.getItem("mimo-ts-agent-limit") || 5),
+    agents: null,
+    frAgent: localStorage.getItem("mimo-ts-fr-agent") || "",
+    frSearch: "",
+    frBucket: "",
+    frLimit: Number(localStorage.getItem("mimo-ts-fr-limit") || 10),
+    firstRound: null,
+    rootsSearch: "",
+    rootsLimit: Number(localStorage.getItem("mimo-ts-roots-limit") || 5),
+    roots: null,
   };
 
   function persistOpenRanks() {
@@ -244,6 +257,7 @@
         state.sessions = data.by_session || [];
         renderAll(data);
         hideBanner();
+        loadDimensions();
       } else {
         showBanner(data.error || "加载失败", true);
       }
@@ -1443,6 +1457,295 @@
     }
   }
 
+  // ── agent / 首轮 / 会话归并 ────────────────────────────────
+  async function loadDimensions() {
+    const range = encodeURIComponent(state.range);
+    await Promise.all([
+      fetchJSON(`/api/agents?range=${range}`)
+        .then((d) => {
+          if (d.ok) state.agents = d;
+        })
+        .catch(() => {}),
+      fetchJSON(`/api/sessions-root?range=${range}`)
+        .then((d) => {
+          if (d.ok) state.roots = d;
+        })
+        .catch(() => {}),
+    ]);
+    // 先校正筛选值（本地记下的 agent 可能已经不存在），再按校正后的值取首轮
+    populateFirstRoundAgentFilter();
+    await loadFirstRound();
+    renderAgents();
+    renderFirstRound();
+    renderRoots();
+  }
+
+  async function loadFirstRound() {
+    const range = encodeURIComponent(state.range);
+    const agent = state.frAgent ? `&agent=${encodeURIComponent(state.frAgent)}` : "";
+    try {
+      const d = await fetchJSON(`/api/first-round?range=${range}${agent}`);
+      if (d.ok) state.firstRound = d;
+    } catch (_) {}
+  }
+
+  function populateFirstRoundAgentFilter() {
+    const sel = $("#firstround-agent");
+    if (!sel) return;
+    const agents = (state.agents?.by_agent || []).map((a) => a.agent);
+    sel.innerHTML =
+      `<option value="">全部 agent</option>` +
+      agents.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+    sel.value = agents.includes(state.frAgent) ? state.frAgent : "";
+    if (!sel.value && state.frAgent) state.frAgent = "";
+  }
+
+  function renderAgents() {
+    const el = $("#agent-list");
+    const sub = $("#agents-sub");
+    if (sub) sub.textContent = state.agents?.range_label || "";
+    if (!el) return;
+    const list = state.agents?.by_agent || [];
+    if (!list.length) {
+      el.innerHTML = `<div style="color:var(--text-3);font-size:12px;padding:16px 0">暂无数据</div>`;
+      return;
+    }
+    const sorted = sortRankItems(list, state.agentSort);
+    const limit = state.agentLimit > 0 ? state.agentLimit : sorted.length;
+    el.innerHTML = sorted
+      .slice(0, limit)
+      .map((a, i) => {
+        const open = state.openAgent === a.agent;
+        return rankRow({
+          name: a.agent,
+          meta: `${a.fmt} · ${formatShare(a.share)} · 命中 ${a.cache_hit}%`,
+          pct: a.share,
+          sub: `${exact(a.turns)} 次/${a.avg_fmt} · ${a.sessions} 会话 · ${a.last_label || "—"}`,
+          fillClass: `model-${i % 4}`,
+          id: a.agent,
+          kind: "agent",
+          open,
+          detail: open ? renderAgentDetail(a) : "",
+        });
+      })
+      .join("");
+
+    el.querySelectorAll(".rank-row").forEach((row) => {
+      const agent = row.dataset.name;
+      const toggle = (e) => {
+        if (e.target?.closest?.("[data-collapse]")) {
+          state.openAgent = null;
+          renderAgents();
+          return;
+        }
+        state.openAgent = state.openAgent === agent ? null : agent;
+        renderAgents();
+      };
+      row.addEventListener("click", toggle);
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle(e);
+        }
+      });
+    });
+  }
+
+  function renderAgentDetail(a) {
+    const models = a.models || [];
+    return `
+      <div class="rank-detail">
+        <div class="rank-detail-head">
+          <span class="rank-detail-title">指标</span>
+          <button type="button" class="rank-detail-close" data-collapse="1" aria-label="收起">×</button>
+        </div>
+        <div class="rank-detail-grid">
+          <div class="mini-row"><span class="n">请求 / 次均</span><span class="v">${exact(a.turns)} 次/${a.avg_fmt}</span></div>
+          <div class="mini-row"><span class="n">入/出/缓存</span><span class="v">${formatTok(a.input)} / ${formatTok(a.output)} / ${formatTok(a.cache)}</span></div>
+          <div class="mini-row"><span class="n">会话</span><span class="v">${a.sessions || 0}</span></div>
+          <div class="mini-row"><span class="n">命中率</span><span class="v">${a.cache_hit}%</span></div>
+        </div>
+        <div class="rank-detail-title">分模型</div>
+        <div class="rank-detail-list">
+        ${
+          models.length
+            ? models
+                .map(
+                  (m) =>
+                    `<div class="mini-row"><span class="n" title="${escapeHtml(m.model)}">${escapeHtml(m.model)}</span><span class="v">${m.fmt} · ${formatShare(m.share)}</span></div>`
+                )
+                .join("")
+            : `<div class="mini-row"><span class="n">无</span></div>`
+        }
+        </div>
+      </div>`;
+  }
+
+  function renderFirstRound() {
+    const d = state.firstRound;
+    if (!d) return;
+    const sub = $("#firstround-sub");
+    const sum = $("#firstround-summary");
+    const bx = $("#firstround-buckets");
+    const note = $("#firstround-pending");
+    const t = d.totals || {};
+
+    if (sub) {
+      sub.textContent = `${d.range_label || ""}${d.agent ? ` · ${d.agent}` : ""} · 首轮 ${exact(t.n)} 条`;
+    }
+    if (sum) {
+      sum.innerHTML =
+        `零命中 <b>${exact(t.zero)}</b> 条（${t.zero_pct ?? 0}%）· 逐条均值 <b>${t.avg_hit ?? 0}%</b> · token 加权 <b>${t.hit_weighted ?? 0}%</b>`;
+    }
+    if (bx) {
+      bx.innerHTML = (d.buckets || [])
+        .map(
+          (b) => `
+        <div class="fr-bucket ${b.key}">
+          <div class="fr-bucket-n">${exact(b.n)}</div>
+          <div class="fr-bucket-lbl" title="${escapeHtml(b.label)}">${escapeHtml(b.label)} · ${b.pct}%</div>
+          <div class="fr-bucket-bar"><i style="width:${Math.max(1, Math.min(100, b.pct || 0))}%"></i></div>
+        </div>`
+        )
+        .join("");
+    }
+    if (note) {
+      const p = d.pending || {};
+      if (p.rows > 0) {
+        note.hidden = false;
+        note.textContent = `另有 ${exact(p.rows)} 条 total=0 的消息排在本组首轮之前（${p.groups} 组，其中 ${p.unlanded} 组至今没有任何非零消耗）。写入是异步的，可能还没落盘，不等于「没有消耗」。`;
+      } else {
+        note.hidden = true;
+      }
+    }
+    renderFirstRoundTable();
+  }
+
+  function renderFirstRoundTable() {
+    const tbody = $("#firstround-tbody");
+    const empty = $("#firstround-empty");
+    const dsub = $("#firstround-detail-sub");
+    if (!tbody) return;
+    if (dsub) {
+      dsub.textContent = `每个 会话 × agent 的第一条非零消耗请求 · 命中率最低的排前面`;
+    }
+    const q = (state.frSearch || "").trim().toLowerCase();
+    const order = { zero: 0, low: 1, mid: 2, high: 3 };
+    let rows = (state.firstRound?.rounds || []).slice();
+    if (state.frBucket) rows = rows.filter((r) => r.bucket === state.frBucket);
+    if (q) {
+      rows = rows.filter(
+        (r) =>
+          (r.title || "").toLowerCase().includes(q) ||
+          (r.agent || "").toLowerCase().includes(q) ||
+          (r.project_name || "").toLowerCase().includes(q)
+      );
+    }
+    rows.sort((a, b) => order[a.bucket] - order[b.bucket] || a.hit - b.hit || b.total - a.total);
+
+    if (!rows.length) {
+      tbody.innerHTML = "";
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    const limit = state.frLimit > 0 ? state.frLimit : rows.length;
+    tbody.innerHTML = rows
+      .slice(0, limit)
+      .map(
+        (r) => `
+        <tr tabindex="0" data-id="${escapeHtml(r.session_id)}">
+          <td>
+            <div class="title-cell" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
+            <span class="sub-line">${escapeHtml(r.agent)}</span>
+          </td>
+          <td>${escapeHtml(r.time_label || "—")}</td>
+          <td class="num">${formatTok(r.input)}</td>
+          <td class="num">${formatTok(r.cache_read)}</td>
+          <td class="num hit-cell ${r.bucket}">${r.hit}%</td>
+          <td class="num tok-col" style="color:var(--text);font-weight:600">${r.fmt}</td>
+        </tr>`
+      )
+      .join("");
+
+    tbody.querySelectorAll("tr").forEach((tr) => {
+      const open = () => openDrawer(tr.dataset.id);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      });
+    });
+  }
+
+  function renderRoots() {
+    const tbody = $("#roots-tbody");
+    const empty = $("#roots-empty");
+    const sub = $("#roots-sub");
+    const d = state.roots;
+    if (!tbody) return;
+    if (sub) {
+      const tt = d?.totals || {};
+      sub.textContent = `${d?.range_label || ""} · ${tt.roots || 0} 个根会话，已并入 ${tt.child_sessions || 0} 个子会话（${formatTok(tt.child_tokens || 0)}）`;
+    }
+    const q = (state.rootsSearch || "").trim().toLowerCase();
+    let rows = (d?.by_root || []).slice();
+    if (q) {
+      rows = rows.filter(
+        (r) =>
+          (r.title || "").toLowerCase().includes(q) ||
+          (r.project_name || "").toLowerCase().includes(q) ||
+          (r.children || []).some((c) => (c.title || "").toLowerCase().includes(q))
+      );
+    }
+    if (!rows.length) {
+      tbody.innerHTML = "";
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    const limit = state.rootsLimit > 0 ? state.rootsLimit : rows.length;
+    tbody.innerHTML = rows
+      .slice(0, limit)
+      .map((r) => {
+        const childMeta = r.children?.length
+          ? `${r.children.length} 个子会话 · ${formatTok(r.child_tokens)}`
+          : "无子会话";
+        return `
+        <tr tabindex="0" data-id="${escapeHtml(r.id)}">
+          <td>
+            <div class="title-cell" title="${escapeHtml(r.title)}">${escapeHtml(r.title)}</div>
+            <span class="sub-line">${escapeHtml(childMeta)}</span>
+          </td>
+          <td class="proj-col" title="${escapeHtml(r.directory || "")}">${escapeHtml(r.project_name || "—")}</td>
+          <td class="num">${exact(r.turns)}</td>
+          <td class="num">${r.cache_hit ?? 0}%</td>
+          <td class="num">${r.merged_sessions ?? 1}</td>
+          <td class="num tok-col" style="color:var(--text);font-weight:600">${r.fmt}</td>
+          <td class="bar-col">
+            <div class="share-cell">
+              <div class="mini-bar"><i style="width:${Math.min(100, Math.max(r.share > 0 ? 2 : 0, r.share || 0))}%"></i></div>
+              <span class="share-num">${r.share ?? 0}%</span>
+            </div>
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    tbody.querySelectorAll("tr").forEach((tr) => {
+      const open = () => openDrawer(tr.dataset.id);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      });
+    });
+  }
+
   // ── drawer ────────────────────────────────────────────────
   async function openDrawer(id) {
     if (!id) return;
@@ -1945,6 +2248,59 @@
       renderProjects(state.data?.by_project || []);
     });
 
+    // ── 新维度控件 ──
+    $("#agent-limit")?.addEventListener("change", (e) => {
+      state.agentLimit = Number(e.target.value) || 0;
+      localStorage.setItem("mimo-ts-agent-limit", String(state.agentLimit));
+      renderAgents();
+    });
+
+    $("#agent-sort")?.addEventListener("change", (e) => {
+      state.agentSort = e.target.value;
+      localStorage.setItem("mimo-ts-agent-sort", state.agentSort);
+      renderAgents();
+    });
+
+    $("#firstround-agent")?.addEventListener("change", async (e) => {
+      state.frAgent = e.target.value || "";
+      localStorage.setItem("mimo-ts-fr-agent", state.frAgent);
+      await loadFirstRound();
+      renderFirstRound();
+    });
+
+    $("#firstround-bucket")?.addEventListener("change", (e) => {
+      state.frBucket = e.target.value || "";
+      renderFirstRoundTable();
+    });
+
+    $("#firstround-limit")?.addEventListener("change", (e) => {
+      state.frLimit = Number(e.target.value) || 0;
+      localStorage.setItem("mimo-ts-fr-limit", String(state.frLimit));
+      renderFirstRoundTable();
+    });
+
+    $("#firstround-search")?.addEventListener(
+      "input",
+      debounce((e) => {
+        state.frSearch = e.target.value || "";
+        renderFirstRoundTable();
+      }, 160)
+    );
+
+    $("#roots-limit")?.addEventListener("change", (e) => {
+      state.rootsLimit = Number(e.target.value) || 0;
+      localStorage.setItem("mimo-ts-roots-limit", String(state.rootsLimit));
+      renderRoots();
+    });
+
+    $("#roots-search")?.addEventListener(
+      "input",
+      debounce((e) => {
+        state.rootsSearch = e.target.value || "";
+        renderRoots();
+      }, 160)
+    );
+
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if ($("#settings-modal")?.classList.contains("open")) {
@@ -1960,6 +2316,9 @@
           setOpenProject(null);
           renderModels(currentRankModels());
           renderProjects(currentRankProjects());
+        } else if (state.openAgent) {
+          state.openAgent = null;
+          renderAgents();
         } else closeDayDetail();
       }
       if (e.key === "r" || e.key === "R") {
@@ -1993,6 +2352,14 @@
     if (pSel) pSel.value = String(state.projectLimit || 0);
     const pSort = $("#project-sort");
     if (pSort) pSort.value = state.projectSort || "tokens";
+    const aSel = $("#agent-limit");
+    if (aSel) aSel.value = String(state.agentLimit || 0);
+    const aSort = $("#agent-sort");
+    if (aSort) aSort.value = state.agentSort || "tokens";
+    const frLimit = $("#firstround-limit");
+    if (frLimit) frLimit.value = String(state.frLimit || 0);
+    const rootsLimit = $("#roots-limit");
+    if (rootsLimit) rootsLimit.value = String(state.rootsLimit || 0);
     if (!state.autoRefresh) {
       $("#live-pill")?.classList.add("paused");
       const label = $("#live-label");

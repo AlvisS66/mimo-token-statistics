@@ -96,6 +96,24 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
   - `mimo-x-flash-preview` / `mimo-x-pro-preview`：未走 Smart 路由的**常规** flash / pro 模型
   - 同一批数据里新旧或不同入口 ID 可能并列出现在排行中
 
+### 首轮口径（写死，别再引用旧数字）
+
+- **首轮** = 同一 `(session_id, agent_id)` 内，按时间排序**第一条 `total > 0`** 的 assistant 消息。
+- **在全部历史上定位首轮，时间范围只用于筛选结果**。若先按时间窗口截断再取「窗口内第一条」，窗口起点之前就已存在的会话会被反复当成「新开了一轮」，同一会话在不同范围下的首轮条数会漂移。
+- **命中率三数全部取服务商上报值**，面板不做任何估算。全库 `cache.write` 恒为 0，因此分母实际只有 `cache.read + input`。
+- **分桶**：命中率先四舍五入取整，再分为 `0%` / `[1,50)` / `[50,90)` / `[90,100]`。
+- **两种平均命中率不要混用**：
+  - `avg_hit` = 每条首轮命中率的**算术平均**（逐条平均，一条 0% 会把均值拉得很低）
+  - `hit_weighted` = `Σcache.read / (Σcache.read + Σinput)`（**token 加权**）
+  
+  同一窗口下两者能差 10 个百分点以上（例：近 7 天逐条 44.8% vs 加权 58%），这正是历史上出现口径争议的原因。
+- **`total = 0` 不等于没有消耗**：写入是异步的，同一条消息可能先读到全 0、几秒后才有值。首轮统计按「第一条 `total > 0`」取数，同时把「排在首轮之前的全 0 行」单独计入 `pending`，不静默吞掉。
+- **子会话只有 checkpoint writer**：`parent_id` 非空的会话共 499 个，assistant 消息全部属于 `checkpoint-writer-1`。`general-*` / `explore-*` 都是**父会话内的 agent**，`parent_id` 为空，因此**不能用 `parent_id` 判断「是不是子 agent」**。
+
+> 历史勘误：曾有一份结论写「7 天 32 条首轮里 13 条零命中 = 78.5%」。按 6 小时粒度扫描 20 天内的全部 7 天窗口，**没有任何窗口**能同时复现这三个数：
+> `32` 是同一窗口下**全部 agent** 的首轮零命中条数，`13` 是**writer** 的首轮零命中条数（13/36 = 36%），`78.5%` 则是另一个窗口下**按 token 加权**的未命中份额（78.6%）。
+> 三个数字来自三个不同口径、不同窗口，被拼进了同一句话。请以 `GET /api/first-round` 的返回为准。
+
 ## 数据来源
 
 | 路径 | 用途 |
@@ -119,6 +137,9 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 | GET | `/api/day-hourly?date=` | 某日 24 小时分模型（日历联动） |
 | GET | `/api/days-hourly?dates=` | 多日合并小时分布，`dates` 为逗号分隔日期（Shift 多选） |
 | GET | `/api/session?id=` | 单会话明细（最近请求列表） |
+| GET | `/api/agents?range=` | **按 agent 汇总**：用量、命中率、会话数、分模型明细 |
+| GET | `/api/first-round?range=&agent=` | **首轮命中**：分桶（0% / 1–50% / 50–90% / 90–100%）+ 每会话明细 + `pending` 未落盘计数。`agent` 支持前缀（`checkpoint-writer` 可命中 `checkpoint-writer-1`） |
+| GET | `/api/sessions-root?range=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细 |
 | GET | `/api/export.csv?range=` | 按当前范围导出 CSV |
 | GET | `/api/health` | 健康检查（别名 `/api/status`） |
 | GET | `/api/quota` | 可选：读本机 cookie 查询官方周配额 |

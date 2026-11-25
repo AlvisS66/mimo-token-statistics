@@ -276,6 +276,137 @@
         </div>
       </section>
 
+      <!-- Agent 维度 + 首轮命中 -->
+      <section class="mid-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Agent 用量</h2>
+              <p class="panel-sub" id="agents-sub">近 7 天</p>
+            </div>
+            <div class="panel-tools">
+              <select id="agent-sort" class="select" aria-label="Agent 排序">
+                <option value="tokens" selected>按消耗</option>
+                <option value="turns">按轮次</option>
+                <option value="avg">按次均</option>
+                <option value="hit">按命中率</option>
+              </select>
+              <select id="agent-limit" class="select" aria-label="Agent 显示条数">
+                <option value="5" selected>5 条</option>
+                <option value="10">10 条</option>
+                <option value="0">全部</option>
+              </select>
+            </div>
+          </div>
+          <div id="agent-list" class="rank-list expandable"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">首轮命中</h2>
+              <p class="panel-sub" id="firstround-sub">近 7 天</p>
+            </div>
+            <div class="panel-tools">
+              <select id="firstround-agent" class="select" aria-label="按 Agent 筛选首轮">
+                <option value="">全部 agent</option>
+              </select>
+            </div>
+          </div>
+          <div class="fr-summary" id="firstround-summary"></div>
+          <div class="fr-buckets" id="firstround-buckets"></div>
+          <div class="fr-note" id="firstround-pending" hidden></div>
+        </article>
+      </section>
+
+      <!-- 首轮明细 -->
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">首轮明细</h2>
+            <p class="panel-sub" id="firstround-detail-sub">每个 会话 × agent 的第一条非零消耗请求</p>
+          </div>
+          <div class="table-tools">
+            <div class="search-box">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+              <input type="search" id="firstround-search" placeholder="搜索会话 / agent…" autocomplete="off" />
+            </div>
+            <select id="firstround-bucket" class="select" aria-label="按命中分桶筛选">
+              <option value="">全部分桶</option>
+              <option value="zero">0%</option>
+              <option value="low">1–50%</option>
+              <option value="mid">50–90%</option>
+              <option value="high">90–100%</option>
+            </select>
+            <select id="firstround-limit" class="select" aria-label="首轮明细条数">
+              <option value="10" selected>10 条</option>
+              <option value="20">20 条</option>
+              <option value="50">50 条</option>
+              <option value="0">全部</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table" id="firstround-table">
+            <thead>
+              <tr>
+                <th>会话 / Agent</th>
+                <th>首轮时间</th>
+                <th class="num">输入</th>
+                <th class="num">缓存命中</th>
+                <th class="num">命中率</th>
+                <th class="num tok-col">消耗</th>
+              </tr>
+            </thead>
+            <tbody id="firstround-tbody">
+              <tr class="loading-row"><td colspan="6">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-empty" id="firstround-empty" hidden>没有匹配的首轮</div>
+      </section>
+
+      <!-- 会话归并（父子会话） -->
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">会话归并</h2>
+            <p class="panel-sub" id="roots-sub">子会话（checkpoint writer）的消耗并入根会话</p>
+          </div>
+          <div class="table-tools">
+            <div class="search-box">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
+              <input type="search" id="roots-search" placeholder="搜索根会话…" autocomplete="off" />
+            </div>
+            <select id="roots-limit" class="select" aria-label="会话归并条数">
+              <option value="5" selected>5 条</option>
+              <option value="10">10 条</option>
+              <option value="20">20 条</option>
+              <option value="0">全部</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table" id="roots-table">
+            <thead>
+              <tr>
+                <th>根会话</th>
+                <th class="proj-col">项目</th>
+                <th class="num">轮次</th>
+                <th class="num">命中率</th>
+                <th class="num">子会话</th>
+                <th class="num tok-col">消耗</th>
+                <th class="bar-col">占比</th>
+              </tr>
+            </thead>
+            <tbody id="roots-tbody">
+              <tr class="loading-row"><td colspan="7">加载中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-empty" id="roots-empty" hidden>没有匹配的会话</div>
+      </section>
+
       <section class="insight-grid" id="insight-grid"></section>
 
       <footer class="footer">

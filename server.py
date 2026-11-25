@@ -129,8 +129,12 @@ def open_db() -> sqlite3.Connection:
     return conn
 
 
-def parse_tokens(raw: Optional[str]) -> Optional[Dict[str, int]]:
-    """从 message.data 中提取 token 统计；无效消息返回 None。"""
+def parse_tokens(raw: Optional[str], keep_zero: bool = False) -> Optional[Dict[str, int]]:
+    """从 message.data 中提取 token 统计；无效消息返回 None。
+
+    keep_zero=True 时，assistant 消息即使 token 全 0 也返回（带 zero=True）：
+    写入是异步的，全 0 可能是「还没写完」而不是「没有消耗」。
+    """
     if not raw:
         return None
     try:
@@ -154,7 +158,8 @@ def parse_tokens(raw: Optional[str]) -> Optional[Dict[str, int]]:
     total = int(tok.get("total") or 0)
     if total <= 0:
         total = inp + outp + reasoning + cr + cw
-    if total <= 0 and inp == 0 and outp == 0 and cr == 0 and cw == 0 and reasoning == 0:
+    zero = total <= 0 and inp == 0 and outp == 0 and cr == 0 and cw == 0 and reasoning == 0
+    if zero and not keep_zero:
         return None
 
     return {
@@ -166,6 +171,7 @@ def parse_tokens(raw: Optional[str]) -> Optional[Dict[str, int]]:
         "total": total,
         "model": d.get("modelID") or d.get("model") or "unknown",
         "msg_time": int((d.get("time") or {}).get("created") or 0),
+        "zero": zero,
     }
 
 
@@ -254,6 +260,8 @@ def pack_mstat(mid: str, st: Dict[str, int], denom_tokens: int = 0) -> Dict[str,
 
 _FULL_ITEMS: Optional[List[Dict[str, Any]]] = None
 _FULL_META: Optional[Dict[str, Any]] = None
+_FULL_FIRST: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None
+_FULL_PENDING: Optional[Dict[Tuple[str, str], List[int]]] = None
 _FULL_ITEMS_AT = 0.0
 _FULL_ITEMS_TTL = 180.0  # 一次全量扫描后，各时间范围共用内存结果
 
@@ -262,12 +270,13 @@ def _load_session_meta() -> Dict[str, Any]:
     conn = open_db()
     try:
         c = conn.cursor()
-        c.execute("SELECT id, title, directory, project_id FROM session")
+        c.execute("SELECT id, title, directory, project_id, parent_id FROM session")
         sessions = {
             r["id"]: {
                 "title": (r["title"] or "").strip(),
                 "directory": r["directory"] or "",
                 "project_id": r["project_id"] or "",
+                "parent_id": r["parent_id"] or "",
             }
             for r in c.fetchall()
         }
@@ -304,7 +313,7 @@ def _parse_message_rows(rows) -> List[Dict[str, Any]]:
 
 def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
     """全量 assistant token 行（带内存缓存，供各 range 复用）。"""
-    global _FULL_ITEMS, _FULL_META, _FULL_ITEMS_AT
+    global _FULL_ITEMS, _FULL_META, _FULL_FIRST, _FULL_PENDING, _FULL_ITEMS_AT
     now = time.time()
     if (
         not force
@@ -321,7 +330,7 @@ def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
         try:
             c.execute(
                 """
-                SELECT session_id, data, time_created
+                SELECT session_id, agent_id, data, time_created
                 FROM message
                 WHERE json_extract(data, '$.role') = 'assistant'
                 """
@@ -330,7 +339,7 @@ def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
             if not rows:
                 raise sqlite3.OperationalError("empty json_extract")
         except Exception:
-            c.execute("SELECT session_id, data, time_created FROM message")
+            c.execute("SELECT session_id, agent_id, data, time_created FROM message")
             rows = c.fetchall()
         meta = _load_session_meta()
     finally:
@@ -338,12 +347,18 @@ def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
 
     sessions = meta["sessions"]
     items: List[Dict[str, Any]] = []
+    zero_rows: List[Dict[str, Any]] = []
     for r in rows:
-        parsed = parse_tokens(r["data"])
+        parsed = parse_tokens(r["data"], keep_zero=True)
         if not parsed:
             continue
         tc = parsed["msg_time"] or int(r["time_created"] or 0)
         sid = r["session_id"] or ""
+        agent = r["agent_id"] or "main"
+        if parsed.pop("zero", False):
+            # total=0：可能是「没消耗」，也可能是「还没写完」，单独留档不参与聚合
+            zero_rows.append({"session_id": sid, "agent": agent, "time": tc})
+            continue
         smeta = sessions.get(sid) or {}
         directory = smeta.get("directory") or ""
         if directory:
@@ -353,6 +368,7 @@ def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
         items.append(
             {
                 "session_id": sid,
+                "agent": agent,
                 "title": smeta.get("title") or sid[:16],
                 "directory": directory,
                 "project_name": pname,
@@ -363,8 +379,30 @@ def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
     items.sort(key=lambda x: x["time"])
     _FULL_ITEMS = items
     _FULL_META = meta
+    _FULL_FIRST = _build_first_round_index(items)
+    _FULL_PENDING = _build_pending_index(zero_rows)
     _FULL_ITEMS_AT = now
     return items
+
+
+def _build_first_round_index(items: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """每个 (session_id, agent_id) 的真首轮 = 全历史里按时间第一条 total>0 的 assistant 消息。
+
+    索引在「全部历史」上建立，与时间范围无关：窗口只用来筛结果，不用来定位首轮。
+    否则窗口起点之前就存在的会话会被误当成「在窗口内新开了一轮」。
+    items 已按 time 升序，故每组的第一条即最早一条。
+    """
+    first: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for it in items:
+        first.setdefault((it["session_id"], it["agent"]), it)
+    return first
+
+
+def _build_pending_index(zero_rows: List[Dict[str, Any]]) -> Dict[Tuple[str, str], List[int]]:
+    pending: Dict[Tuple[str, str], List[int]] = defaultdict(list)
+    for z in zero_rows:
+        pending[(z["session_id"], z["agent"])].append(z["time"])
+    return pending
 
 
 def collect_rows(range_key: str, min_days: int = 0) -> List[Dict[str, Any]]:
@@ -934,6 +972,399 @@ def aggregate(range_key: str) -> Dict[str, Any]:
             "reasoning_pct": round(sum_reason / total * 100, 1) if total else 0,
             "cache_pct": round((sum_cr + sum_cw) / total * 100, 1) if total else 0,
         },
+    }
+    cache_set(cache_key, result)
+    return result
+
+
+def range_since_ms(range_key: str) -> int:
+    """时间范围起点（毫秒）；0 = 全部历史。窗口口径与 aggregate() 一致。"""
+    days = range_days(range_key)
+    if days is None:
+        return 0
+    if (range_key or "").lower() in ("today", "1"):
+        local = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(local.timestamp() * 1000)
+    return int((time.time() - days * 86400) * 1000)
+
+
+def _agent_matches(agent: str, agent_filter: str) -> bool:
+    """agent 过滤支持前缀（?agent=checkpoint-writer 也能命中 checkpoint-writer-1）。"""
+    return not agent_filter or agent == agent_filter or agent.startswith(agent_filter)
+
+
+def aggregate_agents(range_key: str) -> Dict[str, Any]:
+    """按 agent 维度汇总：用量、命中率、会话数、分模型明细。"""
+    cache_key = f"agents:{range_key}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        return hit
+
+    since = range_since_ms(range_key)
+    items = [it for it in load_full_items() if it["time"] >= since] if since else list(load_full_items())
+
+    stats: Dict[str, Dict[str, int]] = defaultdict(new_mstat)
+    sess_of: Dict[str, set] = defaultdict(set)
+    last_of: Dict[str, int] = {}
+    models_of: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(lambda: defaultdict(new_mstat))
+
+    total = 0
+    for it in items:
+        agent = it["agent"]
+        t = it["total"]
+        total += t
+        bump_mstat(stats[agent], it, t)
+        bump_mstat(models_of[agent][it["model"]], it, t)
+        if it["session_id"]:
+            sess_of[agent].add(it["session_id"])
+        if it["time"] > last_of.get(agent, 0):
+            last_of[agent] = it["time"]
+
+    by_agent = []
+    for agent, st in sorted(stats.items(), key=lambda x: -x[1]["tokens"]):
+        row = pack_mstat(agent, st, total)
+        row["agent"] = row.pop("model")
+        row["sessions"] = len(sess_of[agent])
+        row["last"] = last_of.get(agent, 0)
+        row["last_label"] = (
+            datetime.fromtimestamp(last_of[agent] / 1000).strftime("%m-%d %H:%M") if last_of.get(agent) else ""
+        )
+        row["models"] = [
+            pack_mstat(mid, mst, st["tokens"])
+            for mid, mst in sorted(models_of[agent].items(), key=lambda x: -x[1]["tokens"])[:4]
+        ]
+        by_agent.append(row)
+
+    max_tokens = by_agent[0]["tokens"] if by_agent else 0
+    for row in by_agent:
+        row["pct"] = round(row["tokens"] / max_tokens * 100) if max_tokens else 0
+
+    sum_in = sum(r["input"] for r in by_agent)
+    sum_out = sum(r["output"] for r in by_agent)
+    sum_cr = sum(r["cache_read"] for r in by_agent)
+    sum_cw = sum(r["cache_write"] for r in by_agent)
+
+    result = {
+        "ok": True,
+        "range": range_key or "7",
+        "range_label": range_label(range_key),
+        "generated_at": int(time.time() * 1000),
+        "since": since,
+        "totals": {
+            "agents": len(by_agent),
+            "tokens": total,
+            "fmt": format_token_lx(total),
+            "turns": sum(r["turns"] for r in by_agent),
+            "input": sum_in,
+            "output": sum_out,
+            "cache_read": sum_cr,
+            "cache_write": sum_cw,
+            "cache_hit": cache_hit_rate(sum_cr, sum_cw, sum_in),
+        },
+        "by_agent": by_agent,
+    }
+    cache_set(cache_key, result)
+    return result
+
+
+# 首轮命中率分桶：0% / [1,50) / [50,90) / [90,100]
+FIRST_ROUND_BUCKETS = (
+    ("zero", "0%"),
+    ("low", "1–50%"),
+    ("mid", "50–90%"),
+    ("high", "90–100%"),
+)
+
+
+def _first_round_bucket(cr: int, hit: int, denom: int) -> str:
+    if cr <= 0 or denom <= 0:
+        return "zero"
+    if hit < 50:
+        return "low"
+    if hit < 90:
+        return "mid"
+    return "high"
+
+
+def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]:
+    """首轮维度：每个 (session, agent) 在范围窗口内的真首轮命中分布。
+
+    口径（写死，见 README「首轮口径」）：
+      - 首轮 = 同一 (session_id, agent_id) 里按时间第一条 total>0 的 assistant 消息
+      - 首轮在「全部历史」上定位，窗口只筛结果 ⇒ 老会话不会被重复当成新首轮
+      - 命中率 = cache_read / (cache_read + cache_write + input)，三数均为服务商上报值
+    """
+    cache_key = f"fr:{range_key}:{agent_filter}"
+    hit_cached = cache_get(cache_key)
+    if hit_cached is not None:
+        return hit_cached
+
+    load_full_items()
+    first = _FULL_FIRST or {}
+    pending_map = _FULL_PENDING or {}
+    since = range_since_ms(range_key)
+    now_ms = int(time.time() * 1000)
+
+    rounds = [
+        it
+        for (sid, agent), it in first.items()
+        if it["time"] >= since and _agent_matches(agent, agent_filter)
+    ]
+    rounds.sort(key=lambda x: x["time"])
+
+    def build_row(it: Dict[str, Any]) -> Dict[str, Any]:
+        denom = it["cache_read"] + it["cache_write"] + it["input"]
+        rate = cache_hit_rate(it["cache_read"], it["cache_write"], it["input"])
+        return {
+            "session_id": it["session_id"],
+            "agent": it["agent"],
+            "title": it["title"],
+            "project_name": it["project_name"],
+            "time": it["time"],
+            "time_label": datetime.fromtimestamp(it["time"] / 1000).strftime("%m-%d %H:%M:%S"),
+            "total": it["total"],
+            "fmt": format_token_lx(it["total"]),
+            "input": it["input"],
+            "cache_read": it["cache_read"],
+            "cache_write": it["cache_write"],
+            "denom": denom,
+            "hit": rate,
+            "bucket": _first_round_bucket(it["cache_read"], rate, denom),
+        }
+
+    rows = [build_row(it) for it in rounds]
+    bucket_counts = {k: 0 for k, _ in FIRST_ROUND_BUCKETS}
+    for r in rows:
+        bucket_counts[r["bucket"]] += 1
+
+    def summarize(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
+        n = len(subset)
+        zero = sum(1 for r in subset if r["bucket"] == "zero")
+        sum_in = sum(r["input"] for r in subset)
+        sum_cr = sum(r["cache_read"] for r in subset)
+        sum_cw = sum(r["cache_write"] for r in subset)
+        return {
+            "n": n,
+            "zero": zero,
+            "zero_pct": round(zero / n * 100, 1) if n else 0,
+            "avg_hit": round(sum(r["hit"] for r in subset) / n, 1) if n else 0,
+            # token 加权命中率：口径与逐条平均不同，别混用
+            "hit_weighted": cache_hit_rate(sum_cr, sum_cw, sum_in),
+            "tokens": sum(r["total"] for r in subset),
+            "input": sum_in,
+            "cache_read": sum_cr,
+        }
+
+    agents = sorted({r["agent"] for r in rows})
+    by_agent = []
+    for agent in agents:
+        subset = [r for r in rows if r["agent"] == agent]
+        entry = {"agent": agent, **summarize(subset)}
+        entry["buckets"] = {k: sum(1 for r in subset if r["bucket"] == k) for k, _ in FIRST_ROUND_BUCKETS}
+        by_agent.append(entry)
+    by_agent.sort(key=lambda x: -x["n"])
+
+    # 未落盘：total=0 且排在本组真首轮之前的 assistant 行
+    pending_rows = 0
+    pending_groups = set()
+    unlanded = set()
+    for (sid, agent), times in pending_map.items():
+        if agent_filter and not _agent_matches(agent, agent_filter):
+            continue
+        first_item = first.get((sid, agent))
+        cutoff = first_item["time"] if first_item else now_ms + 1
+        for t in times:
+            if t < since or t > now_ms or t >= cutoff:
+                continue
+            pending_rows += 1
+            pending_groups.add((sid, agent))
+            if first_item is None:
+                unlanded.add((sid, agent))
+
+    result = {
+        "ok": True,
+        "range": range_key or "7",
+        "range_label": range_label(range_key),
+        "generated_at": int(time.time() * 1000),
+        "agent": agent_filter,
+        "since": since,
+        "definition": {
+            "first_round": "同一 (session_id, agent_id) 内按时间第一条 total>0 的 assistant 消息",
+            "index_scope": "首轮在全历史上定位，时间范围只用于筛选结果",
+            "hit_rate": "cache_read / (cache_read + cache_write + input)，全部取服务商上报值",
+            "buckets": [label for _, label in FIRST_ROUND_BUCKETS],
+            "buckets_rule": "命中率先取整再分桶：0% / [1,50) / [50,90) / [90,100]",
+        },
+        "totals": {**summarize(rows), "buckets": bucket_counts},
+        "buckets": [
+            {
+                "key": k,
+                "label": label,
+                "n": bucket_counts[k],
+                "pct": round(bucket_counts[k] / len(rows) * 100, 1) if rows else 0,
+            }
+            for k, label in FIRST_ROUND_BUCKETS
+        ],
+        "by_agent": by_agent,
+        "rounds": rows,
+        "pending": {
+            "rows": pending_rows,
+            "groups": len(pending_groups),
+            "unlanded": len(unlanded),
+            "note": "total=0 且排在本组首轮之前：写入是异步的，可能是还没写完，不等同于没有消耗",
+        },
+    }
+    cache_set(cache_key, result)
+    return result
+
+
+def _root_session_id(sid: str, sessions: Dict[str, Any]) -> str:
+    """向上找到根会话；只跳一层也够（checkpoint writer 只嵌一层），但天然支持多层。"""
+    cur = sid
+    seen = {cur}
+    while True:
+        parent = (sessions.get(cur) or {}).get("parent_id") or ""
+        if not parent or parent in seen or parent not in sessions:
+            return cur
+        seen.add(parent)
+        cur = parent
+
+
+def sessions_by_root(range_key: str) -> Dict[str, Any]:
+    """会话用量按根会话归并：子会话（checkpoint writer）的消耗并入父会话。"""
+    cache_key = f"root:{range_key}"
+    hit = cache_get(cache_key)
+    if hit is not None:
+        return hit
+
+    load_full_items()
+    sessions = (_FULL_META or {}).get("sessions") or {}
+    since = range_since_ms(range_key)
+    items = [it for it in load_full_items() if it["time"] >= since] if since else list(load_full_items())
+
+    root_of = {sid: _root_session_id(sid, sessions) for sid in {it["session_id"] for it in items}}
+
+    agg: Dict[str, Dict[str, Any]] = {}
+    children: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    total = 0
+    for it in items:
+        sid = it["session_id"]
+        rid = root_of.get(sid, sid)
+        t = it["total"]
+        total += t
+        s = agg.get(rid)
+        if s is None:
+            smeta = sessions.get(rid) or {}
+            directory = smeta.get("directory") or ""
+            s = agg[rid] = {
+                "id": rid,
+                "title": smeta.get("title") or rid[:16],
+                "directory": directory,
+                "project_name": (os.path.basename(directory.rstrip("/\\")) or directory)
+                if directory
+                else "(未分配目录)",
+                "tokens": 0,
+                "turns": 0,
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+                "last": 0,
+                "sessions": set(),
+                "models": defaultdict(int),
+                "child_tokens": 0,
+                "child_turns": 0,
+            }
+        s["tokens"] += t
+        s["turns"] += 1
+        s["input"] += it["input"]
+        s["output"] += it["output"]
+        s["reasoning"] += it["reasoning"]
+        s["cache_read"] += it["cache_read"]
+        s["cache_write"] += it["cache_write"]
+        s["last"] = max(s["last"], it["time"])
+        s["sessions"].add(sid)
+        s["models"][it["model"]] += t
+        if sid != rid:
+            s["child_tokens"] += t
+            s["child_turns"] += 1
+            c = children[rid].setdefault(
+                sid,
+                {
+                    "id": sid,
+                    "title": (sessions.get(sid) or {}).get("title") or sid[:16],
+                    "tokens": 0,
+                    "turns": 0,
+                    "input": 0,
+                    "cache_read": 0,
+                    "cache_write": 0,
+                },
+            )
+            c["tokens"] += t
+            c["turns"] += 1
+            c["input"] += it["input"]
+            c["cache_read"] += it["cache_read"]
+            c["cache_write"] += it["cache_write"]
+
+    by_root = []
+    for rid, s in sorted(agg.items(), key=lambda x: -x[1]["tokens"]):
+        kids = [
+            {
+                **c,
+                "fmt": format_token_lx(c["tokens"]),
+                "cache_hit": cache_hit_rate(c["cache_read"], c["cache_write"], c["input"]),
+            }
+            for c in sorted(children.get(rid, {}).values(), key=lambda x: -x["tokens"])
+        ]
+        by_root.append(
+            {
+                "id": rid,
+                "title": (s["title"] or rid)[:80],
+                "directory": s["directory"],
+                "project_name": s["project_name"],
+                "tokens": s["tokens"],
+                "fmt": format_token_lx(s["tokens"]),
+                "share": round(s["tokens"] / total * 100, 1) if total else 0,
+                "turns": s["turns"],
+                "last": s["last"],
+                "last_label": datetime.fromtimestamp(s["last"] / 1000).strftime("%m-%d %H:%M") if s["last"] else "",
+                "input": s["input"],
+                "output": s["output"] + s["reasoning"],
+                "cache": s["cache_read"] + s["cache_write"],
+                "avg": round(s["tokens"] / s["turns"]) if s["turns"] else 0,
+                "avg_fmt": format_token_lx(s["tokens"] / s["turns"]) if s["turns"] else "0",
+                "cache_hit": cache_hit_rate(s["cache_read"], s["cache_write"], s["input"]),
+                "merged_sessions": len(s["sessions"]),
+                "child_tokens": s["child_tokens"],
+                "child_turns": s["child_turns"],
+                "models": [
+                    {"model": mid, "tokens": mt, "share": round(mt / s["tokens"] * 100, 1) if s["tokens"] else 0}
+                    for mid, mt in sorted(s["models"].items(), key=lambda x: -x[1])[:4]
+                ],
+                "children": kids[:20],
+            }
+        )
+
+    max_tokens = by_root[0]["tokens"] if by_root else 0
+    for s in by_root:
+        s["pct"] = round(s["tokens"] / max_tokens * 100) if max_tokens else 0
+
+    result = {
+        "ok": True,
+        "range": range_key or "7",
+        "range_label": range_label(range_key),
+        "generated_at": int(time.time() * 1000),
+        "since": since,
+        "totals": {
+            "roots": len(by_root),
+            "raw_sessions": len(root_of),
+            "child_sessions": sum(1 for sid, rid in root_of.items() if sid != rid),
+            "tokens": total,
+            "fmt": format_token_lx(total),
+            "child_tokens": sum(s["child_tokens"] for s in by_root),
+        },
+        "by_root": by_root[:100],
     }
     cache_set(cache_key, result)
     return result
@@ -1730,7 +2161,7 @@ LOGIN_PAGE = """<!DOCTYPE html>
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "MiMoTokenStats/1.0.1"
+    server_version = "MiMoTokenStats/1.0.2"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
@@ -1948,6 +2379,37 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": str(e)}, 500)
                 return
 
+            if path == "/api/agents":
+                rk = qs.get("range", "7")
+                try:
+                    self._json(aggregate_agents(rk))
+                except FileNotFoundError as e:
+                    self._json({"ok": False, "error": str(e)}, 503)
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)}, 500)
+                return
+
+            if path == "/api/first-round":
+                rk = qs.get("range", "7")
+                agent = (qs.get("agent", "") or "").strip()
+                try:
+                    self._json(first_round_report(rk, agent))
+                except FileNotFoundError as e:
+                    self._json({"ok": False, "error": str(e)}, 503)
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)}, 500)
+                return
+
+            if path == "/api/sessions-root":
+                rk = qs.get("range", "7")
+                try:
+                    self._json(sessions_by_root(rk))
+                except FileNotFoundError as e:
+                    self._json({"ok": False, "error": str(e)}, 503)
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)}, 500)
+                return
+
             if path == "/api/session":
                 sid = qs.get("id", "")
                 if not sid:
@@ -2005,9 +2467,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/refresh":
                 cache_clear()
-                global _FULL_ITEMS, _FULL_META, _FULL_ITEMS_AT
+                global _FULL_ITEMS, _FULL_META, _FULL_FIRST, _FULL_PENDING, _FULL_ITEMS_AT
                 _FULL_ITEMS = None
                 _FULL_META = None
+                _FULL_FIRST = None
+                _FULL_PENDING = None
                 _FULL_ITEMS_AT = 0.0
                 self._json({"ok": True, "cleared": True})
                 return
