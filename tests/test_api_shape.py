@@ -338,13 +338,13 @@ class ModelProvidersTest(FixtureMixin, unittest.TestCase):
 
     def test_overview_by_model_carries_providers(self):
         rows = {r["model"]: r for r in server.aggregate("7")["by_model"]}
-        self.assertIn("m-test", rows)
+        self.assertIn("m-test", rows, "模型用量里应有 fixture 的 m-test")
         self.assertEqual(rows["m-test"]["providers"], ["prov-a"])
 
     def test_dates_ranks_by_model_carries_providers(self):
         ranks = server.aggregate_dates_ranks([self.recent_day])
         rows = {r["model"]: r for r in ranks["by_model"]}
-        self.assertIn("m-test", rows)
+        self.assertIn("m-test", rows, "选中日期口径的模型用量里应有 m-test")
         self.assertEqual(rows["m-test"]["providers"], ["prov-a"])
 
     def test_providers_sorted_by_turns(self):
@@ -355,10 +355,11 @@ class ModelProvidersTest(FixtureMixin, unittest.TestCase):
                 "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (sid, "proj-1", None, "/proj/a", "Providers 2", self.t_recent, self.t_recent),
             )
+            # p-z 出现 2 次、p-a 出现 1 次：按次数降序是 [p-z, p-a]，纯字典序会反过来
             rows = [
-                ("q01", self.t_recent + 1000, _assistant(self.t_recent + 1000, 10, 1, 0, provider="p-c")),
-                ("q02", self.t_recent + 2000, _assistant(self.t_recent + 2000, 10, 1, 0, provider="p-b")),
-                ("q03", self.t_recent + 3000, _assistant(self.t_recent + 3000, 10, 1, 0, provider="p-b")),
+                ("q01", self.t_recent + 1000, _assistant(self.t_recent + 1000, 10, 1, 0, provider="p-z")),
+                ("q02", self.t_recent + 2000, _assistant(self.t_recent + 2000, 10, 1, 0, provider="p-a")),
+                ("q03", self.t_recent + 3000, _assistant(self.t_recent + 3000, 10, 1, 0, provider="p-z")),
             ]
             conn.executemany(
                 "INSERT INTO message VALUES (?, ?, ?, ?, ?, ?)",
@@ -369,7 +370,9 @@ class ModelProvidersTest(FixtureMixin, unittest.TestCase):
             conn.close()
         self._reset_server_cache()
         rows = {r["model"]: r for r in server.aggregate("7")["by_model"]}
-        self.assertEqual(rows["m-test"]["providers"], ["p-b", "p-c", "prov-a"])
+        self.assertIn("m-test", rows)
+        self.assertEqual(rows["m-test"]["providers"][:2], ["p-z", "p-a"])
+        self.assertIn("prov-a", rows["m-test"]["providers"])
 
 
 class RangeWindowTest(FixtureMixin, unittest.TestCase):

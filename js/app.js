@@ -2157,7 +2157,7 @@
     }
   }
 
-  function renderDrawerTurns(reset) {
+  function renderDrawerTurns() {
     const box = $("#drawer-turns");
     if (!box) return;
     if (!state.drawerTurns.length) {
@@ -2166,10 +2166,8 @@
       drawerTurnsHint();
       return;
     }
-    if (reset) {
-      box.innerHTML = TURN_LEGEND; // 图例只插一次
-      state.drawerShown = 0;
-    }
+    box.innerHTML = TURN_LEGEND; // 图例只插一次
+    state.drawerShown = 0;
     appendDrawerTurns(DRAWER_TURN_BATCH);
     fillDrawerViewport();
   }
@@ -2195,6 +2193,9 @@
 
     // 迟到的响应不得覆盖后开的会话（关抽屉也会让在途请求作废）
     const reqId = ++state.drawerReqId;
+    state.drawerTurns = [];
+    state.drawerShown = 0;
+    state.drawerTurnTotal = 0;
     const title = $("#drawer-title");
     const sub = $("#drawer-sub");
     const kpis = $("#drawer-kpis");
@@ -2205,6 +2206,7 @@
     if (kpis) kpis.innerHTML = "";
     if (models) models.innerHTML = "";
     if (turns) turns.innerHTML = `<div class="turn-item"><div class="t-model">加载中…</div></div>`;
+    drawerTurnsHint(); // 旧会话的「已显示 50 / N」不能留在新会话的标题旁边
 
     try {
       const d = await fetchJSON(`/api/session?id=${encodeURIComponent(id)}`);
@@ -2264,11 +2266,12 @@
       if (turns) {
         const all = d.turns || [];
         state.drawerTurns = all.slice().reverse(); // 最新在上
-        state.drawerTurnTotal = Number(d.totals?.turns || all.length);
+        state.drawerTurnTotal = state.drawerTurns.length;
         state.drawerShown = 0;
-        renderDrawerTurns(true);
+        renderDrawerTurns();
       }
     } catch (err) {
+      if (reqId !== state.drawerReqId) return;
       if (turns) turns.innerHTML = `<div class="turn-item"><div class="t-model">加载失败：${escapeHtml(err.message)}</div></div>`;
     }
   }
