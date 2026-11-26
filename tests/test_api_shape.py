@@ -434,6 +434,13 @@ class StaticPathTest(unittest.TestCase):
         self.assertIsNone(server._resolve_static("../../etc/passwd"))
         self.assertIsNone(server._resolve_static("js/../../server.py"))
 
+    def test_only_whitelisted_dirs_are_served(self):
+        # /css/../server.py：解析后仍在仓库根内，但不在放行目录里
+        for rel in ("css/../server.py", "js/../.git/config", "assets/../index.html", "css/..", "js/../"):
+            self.assertIsNone(server._resolve_static(rel), rel)
+        for rel in ("css/style.css", "js/app.js", "assets/dashboard.png", "css/../css/style.css"):
+            self.assertIsNotNone(server._resolve_static(rel), rel)
+
 
 class HttpHeaderTest(FixtureMixin, unittest.TestCase):
     """HTTP 层：不下发 CORS 头，且不响应 OPTIONS（前端与 API 同源，无预检）。"""
@@ -468,6 +475,35 @@ class HttpHeaderTest(FixtureMixin, unittest.TestCase):
             resp.read()
             self.assertEqual(resp.status, 403)
             conn.close()
+        finally:
+            server.Handler.log_message = quiet
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_source_via_traversal_is_forbidden(self):
+        # 静态路由排在鉴权之前：/css/../server.py 解析后仍在仓库根内，旧实现免鉴权 200 回源码
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        quiet = server.Handler.log_message
+        server.Handler.log_message = lambda *a, **k: None
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            for path in ("/css/../server.py", "/assets/../index.html", "/js/../README.md"):
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", path)
+                resp = conn.getresponse()
+                resp.read()
+                conn.close()
+                self.assertEqual(resp.status, 403, path)
+
+            # 放行目录内的文件照常可取（免鉴权）
+            for path in ("/css/style.css", "/js/app.js"):
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", path)
+                resp = conn.getresponse()
+                resp.read()
+                conn.close()
+                self.assertEqual(resp.status, 200, path)
         finally:
             server.Handler.log_message = quiet
             httpd.shutdown()

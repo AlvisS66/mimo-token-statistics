@@ -65,6 +65,12 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 
 Implement 完成后由用户确认追加（spec 原先未含，但项目惯例要求接口变更同步升版本）。版本串升为 `MiMoTokenStats/1.0.3`（`Handler.server_version`，即 `Server` 响应头）；补 `RELEASE_NOTES_v1.0.3.md`，沿用既有格式归纳本次全部接口变更。
 
+### S2.8 静态路由只放行三个目录（评审跟进，合并前追加）
+
+独立评审发现：静态路由排在鉴权之前，按原始路径前缀（`/assets/`、`/css/`、`/js/`）放行后，`_resolve_static` 只校验解析结果没出仓库根，于是 `/css/../server.py` 免登录返回 200 与服务端源码；同一路数还能读到 `index.html`、`README.md`、`.git/config`。
+
+改为解析后的路径必须落在 `assets/`、`css/`、`js/` 三个目录之一，其余一律 403（`STATIC_DIRS` 一处定义，路由前缀判断与解析校验共用）。`index.html` 仍只经 `/` 与 `/index.html` 路由、过鉴权后提供。
+
 ## [S3] Out of Scope
 
 - 密码持久化（需单独决定存储位置与哈希方案）。
@@ -85,6 +91,7 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - [x] T7: 前端 `loadDimensions` 带 `dates`、副标题用 `selectionLabel`、`closeDayDetail` 回区间 — acceptance: 浏览器选中一天后三面板副标题显示该日期，取消后恢复区间标签 (covers: S2.1) (depends: T6)
 - [x] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 - [x] T9: 版本串升 `1.0.3` + `RELEASE_NOTES_v1.0.3.md` — acceptance: `server.py` 中不再出现 `1.0.2`；发布说明覆盖本次全部接口变更 (covers: S2.7) (depends: T8)
+- [x] T10: 静态路由只放行 `assets` / `css` / `js` 三个目录 — acceptance: 测试断言 `_resolve_static("css/../server.py")` 为 `None` 而 `css/style.css` 正常；未鉴权请求 `/css/../server.py`、`/assets/../index.html`、`/js/../README.md` 均回 403，`/css/style.css` 回 200 (covers: S2.8)
 
 ## Journey log
 
@@ -111,4 +118,6 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
   - 三个面板的副标题按「选中了什么」而非「展示的是哪份数据」来写，请求失败时会写着选中日期、数字却是区间。改为跟随数据自带的 `dates`；浏览器里掐断三个接口的请求后实测，副标题留在区间标签。
   - 发布说明里「返回与 v1.0.2 一致」与同文的分桶修复自相矛盾，已勘误；补记 `days-hourly` 的 `by_model` 也带 `pct`。
   - 另补 `agent + dates` 组合测试、修正未导入的类型注解与照抄生产表达式的期望值，测试 41 条。
-  - 未处理的评审项（既有问题，超出本 spec，待用户决定）：agent 下拉连改的竞态（`app.js` 的 `firstround-agent` change 处理不经过守门）；选中日期时该 agent 当日无数据会被清空筛选（与「先校正再取首轮」的既有设计决定相关）；`/css/../server.py` 等仓库根目录内的文件可经静态路由未登录读取（`main` 上同样存在）。
+  - 未处理的评审项（既有问题，原超出本 spec；用户已确认追加为 T10–T13）：agent 下拉连改的竞态（`app.js` 的 `firstround-agent` change 处理不经过守门）；选中日期时该 agent 当日无数据会被清空筛选（与「先校正再取首轮」的既有设计决定相关）；`/css/../server.py` 等仓库根目录内的文件可经静态路由未登录读取（`main` 上同样存在）。
+- **评审跟进（合并前追加，用户确认）**：评审留下的既有问题里，`main` 上同样存在的四项由用户确认一并修掉（T10–T13），作为本 spec 的修订。
+- **T10**：先用未鉴权的 HTTP 用例复现——`/css/../server.py` 在旧实现上回 200。修复后回 403，`StaticPathTest` 之外的放行目录文件仍免鉴权可取，测试 43 条。

@@ -2188,13 +2188,19 @@ LOGIN_PAGE = """<!DOCTYPE html>
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
+STATIC_DIRS = ("assets", "css", "js")
+
+
 def _resolve_static(rel: str) -> Optional[Path]:
-    """把 URL 路径解析为前端目录内的绝对路径；越界返回 None。
+    """把 URL 路径解析为放行目录内的绝对路径；不在其中返回 None。
 
     按路径段判断包含关系：str.startswith 会把同名前缀的兄弟目录（foo-x/）当成 foo/ 的子路径。
+    判断的是解析后的路径：静态路由排在鉴权之前，/css/../server.py 解析后仍在仓库根内，
+    若只校验「没出根目录」就会免登录读到源码。
     """
-    target = (FRONTEND_ROOT / rel).resolve()
-    return target if target.is_relative_to(FRONTEND_ROOT.resolve()) else None
+    root = FRONTEND_ROOT.resolve()
+    target = (root / rel).resolve()
+    return target if any(target.is_relative_to(root / d) for d in STATIC_DIRS) else None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2376,7 +2382,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "enabled": AUTH_ENABLED, "authed": self._require_auth()})
                 return
 
-            if path.startswith("/assets/") or path.startswith("/css/") or path.startswith("/js/"):
+            if any(path.startswith(f"/{d}/") for d in STATIC_DIRS):
                 target = _resolve_static(path.lstrip("/"))
                 if target is None:
                     self._json({"ok": False, "error": "forbidden"}, 403)
