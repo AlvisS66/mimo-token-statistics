@@ -77,7 +77,7 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 - [x] T3: `by_model` 加 `pct`，前端五处条宽改 `pct` — acceptance: 测试断言 `by_model[0].pct == 100`；五个渲染函数中条宽表达式均引用 `pct` (covers: S2.2) (depends: T1)
 - [x] T4: 抽 `_resolve_static()` + `is_relative_to`，删 ACAO 头与 `do_OPTIONS` — acceptance: 测试断言 `../server.py` 解析为 `None`、`css/style.css` 正常；`server.py` 中不再出现 `Access-Control-Allow-Origin` (covers: S2.5) (depends: T1)
 - [x] T5: 零散修复六项 — acceptance: 测试断言 `export_csv` 表头末列为 `agent`、`_first_round_bucket(0) == "zero"`；`server.py` 中不再出现 `mktemp` 与 `_parse_message_rows`；`renderRoots` 子会话列引用 `children` (covers: S2.6) (depends: T1)
-- [ ] T6: 三接口加 `dates` 参数与 `select_items()` helper — acceptance: 测试断言 `aggregate_agents(range, dates=[某天]).totals.tokens` 等于 fixture 中该日条目之和，且三个响应均含 `dates` 字段 (covers: S2.1) (depends: T2)
+- [x] T6: 三接口加 `dates` 参数与 `select_items()` helper — acceptance: 测试断言 `aggregate_agents(range, dates=[某天]).totals.tokens` 等于 fixture 中该日条目之和，且三个响应均含 `dates` 字段 (covers: S2.1) (depends: T2)
 - [ ] T7: 前端 `loadDimensions` 带 `dates`、副标题用 `selectionLabel`、`closeDayDetail` 回区间 — acceptance: 浏览器选中一天后三面板副标题显示该日期，取消后恢复区间标签 (covers: S2.1) (depends: T6)
 - [ ] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 
@@ -90,3 +90,8 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 - **T4 `fab0403`**：HTTP 层「同名前缀兄弟目录」用例最初少写一层 `..`，路径实际落在根目录内，回 404 才是正确行为；修正后新旧实现才有区分度（旧 404 / 新 403）。
 - **T5**：六项全部落地，测试 30 条。
   - `mktemp` 的失败路径用例第一版把失败注入在「复制阶段」，实测**区分不了新旧实现**：`mktemp` 只给文件名、不建文件，复制一失败磁盘上什么都没有，新旧泄漏数均为 0。改为「副本落盘后读库失败」后，旧实现泄漏 1 个、新实现 0 个，用例才真正锁住这次修复。
+- **T6**：三接口 `dates` 参数落地，测试 39 条。
+  - spec 写的 helper `select_items(range_key, dates)` 实际落成 `selection_window()` + `_time_in_window()`：首轮接口还要用同一窗口筛 `pending` 的时间戳（不是条目），只返回条目的 helper 覆盖不了；三个函数共用同一处窗口定义。
+  - 缓存键原样只含 `range`，必须掺入 `dates`，否则带日期与不带日期的请求会静默串台——`test_cache_keeps_dates_apart_from_range` 专门锁这一点。
+  - `dates` 模式下 `range_label` 回选中日期（与前端 `selectionLabel()` 同格式）、`since` 回最早选中日的本地零点；`range` 保持回显请求参数。格式错误的日期回 400，不带病算出一份空数据。
+  - 真实库实测（31,218 条，只读）：单日筛选 65 ms，三接口未命中缓存时 72 / 4 / 58 ms，无需优化。

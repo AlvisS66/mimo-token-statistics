@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -34,12 +35,12 @@ EXPECTED_TOP_KEYS = {
         "hourly", "hourly_models", "weekday_hour", "by_model", "by_project",
         "by_session", "composition",
     },
-    "aggregate_agents": {"ok", "range", "range_label", "generated_at", "since", "totals", "by_agent"},
+    "aggregate_agents": {"ok", "range", "range_label", "dates", "generated_at", "since", "totals", "by_agent"},
     "first_round_report": {
-        "ok", "range", "range_label", "generated_at", "agent", "since", "definition",
+        "ok", "range", "range_label", "dates", "generated_at", "agent", "since", "definition",
         "totals", "buckets", "by_agent", "rounds", "pending",
     },
-    "sessions_by_root": {"ok", "range", "range_label", "generated_at", "since", "totals", "by_root"},
+    "sessions_by_root": {"ok", "range", "range_label", "dates", "generated_at", "since", "totals", "by_root"},
     "session_detail": {"ok", "id", "title", "directory", "project_name", "created", "updated", "totals", "models", "turns"},
     "get_day_hourly": {
         "ok", "date", "total", "total_fmt", "turns", "input", "output", "cache", "cache_hit",
@@ -308,6 +309,92 @@ class SessionRootTest(FixtureMixin, unittest.TestCase):
         self.assertEqual(server._root_session_id("c", sessions), "c")  # 悬空 parent：自身为根
 
 
+class DatesSelectionTest(FixtureMixin, unittest.TestCase):
+    """三个维度接口的 dates 参数：按本地日期筛条目，给出时忽略 range。"""
+
+    FNS = {
+        "agents": server.aggregate_agents,
+        "first_round": server.first_round_report,
+        "root": server.sessions_by_root,
+    }
+
+    @property
+    def old_day(self) -> str:
+        return server.day_key(self.t_old)
+
+    @staticmethod
+    def midnight_ms(day: str) -> int:
+        return int(datetime.strptime(day, "%Y-%m-%d").timestamp() * 1000)
+
+    def test_agents_sum_to_selected_day(self):
+        recent = server.aggregate_agents("7", dates=[self.recent_day])
+        self.assertEqual(recent["totals"]["tokens"], 9070)
+        self.assertEqual({r["agent"]: r["tokens"] for r in recent["by_agent"]}, {"main": 7050, "general-1": 2020})
+        today = server.aggregate_agents("7", dates=[self.today_day])
+        self.assertEqual(today["totals"]["tokens"], 3030)
+        self.assertEqual([r["agent"] for r in today["by_agent"]], ["checkpoint-writer-1"])
+
+    def test_dates_override_range(self):
+        # 10 天前不在 7 天窗口内：给出 dates 后 range 不再生效
+        old = server.aggregate_agents("7", dates=[self.old_day])
+        self.assertEqual(old["totals"]["tokens"], 110 + 1234)
+        self.assertEqual(old["range_label"], self.old_day)
+        self.assertEqual(old["since"], self.midnight_ms(self.old_day))
+
+    def test_three_responses_echo_dates(self):
+        for name, fn in self.FNS.items():
+            with self.subTest(fn=name):
+                self.assertEqual(fn("7", dates=[self.recent_day])["dates"], [self.recent_day])
+                self.assertIsNone(fn("7")["dates"])
+
+    def test_first_round_and_pending_follow_dates(self):
+        recent = server.first_round_report("7", dates=[self.recent_day])
+        self.assertEqual(recent["totals"]["n"], 2)
+        self.assertEqual({r["agent"] for r in recent["rounds"]}, {"main", "general-1"})
+        self.assertEqual(recent["pending"]["rows"], 1)  # m02 零壳子排在首轮 m03 之前
+        today = server.first_round_report("7", dates=[self.today_day])
+        self.assertEqual(today["totals"]["n"], 1)
+        self.assertEqual([r["agent"] for r in today["rounds"]], ["checkpoint-writer-1"])
+        self.assertEqual(today["pending"]["rows"], 0)
+
+    def test_sessions_root_follow_dates(self):
+        recent = server.sessions_by_root("7", dates=[self.recent_day])
+        self.assertEqual(recent["totals"]["tokens"], 9070)
+        self.assertEqual(recent["totals"]["child_sessions"], 0)
+        today = server.sessions_by_root("7", dates=[self.today_day])
+        # 当天只有子会话 ses_child 有消耗，归并到 ses_root 名下
+        self.assertEqual(today["totals"]["roots"], 1)
+        self.assertEqual(today["totals"]["child_sessions"], 1)
+        self.assertEqual(today["totals"]["child_tokens"], 3030)
+
+    def test_cache_keeps_dates_apart_from_range(self):
+        # 缓存键必须带上 dates，否则带日期与不带日期的请求会互相串台
+        for name, fn in self.FNS.items():
+            with self.subTest(fn=name):
+                base = fn("7")
+                picked = fn("7", dates=[self.today_day])
+                again = fn("7")
+                self.assertIsNone(base["dates"])
+                self.assertEqual(picked["dates"], [self.today_day])
+                self.assertIsNone(again["dates"])
+                self.assertEqual(again, base)
+                self.assertNotEqual(picked["totals"]["tokens"], base["totals"]["tokens"])
+
+    def test_at_most_32_dates_and_reject_malformed(self):
+        many = [server.day_key(self.t_today - i * DAY_MS) for i in range(40)]
+        self.assertEqual(server.aggregate_agents("7", dates=many)["dates"], many[: server.MAX_DATES])
+        for bad in (["2026-13-45"], ["not-a-date"]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                server.aggregate_agents("7", dates=bad)
+
+    def test_window_helpers(self):
+        since, wanted = server.selection_window("7")
+        self.assertEqual(since, server.range_since_ms("7"))
+        self.assertIsNone(wanted)
+        since, wanted = server.selection_window("7", [self.old_day])
+        self.assertEqual((since, wanted), (self.midnight_ms(self.old_day), {self.old_day}))
+
+
 class StaticPathTest(unittest.TestCase):
     """静态文件路径解析：按路径段判断包含关系。"""
 
@@ -359,6 +446,43 @@ class HttpHeaderTest(FixtureMixin, unittest.TestCase):
             self.assertEqual(resp.status, 403)
             conn.close()
         finally:
+            server.Handler.log_message = quiet
+            httpd.shutdown()
+            httpd.server_close()
+
+
+class DatesHttpTest(FixtureMixin, unittest.TestCase):
+    """HTTP 层：三条路由接受 dates；空值等同未传；格式错误回 400 而不是带病算出空数据。"""
+
+    def test_routes_accept_dates(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        quiet, auth = server.Handler.log_message, server.AUTH_ENABLED
+        server.Handler.log_message = lambda *a, **k: None
+        server.AUTH_ENABLED = False
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+        def get(conn, path):
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            return resp.status, json.loads(resp.read())
+
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            paths = ("/api/agents", "/api/first-round", "/api/sessions-root")
+            for path in paths:
+                with self.subTest(path=path):
+                    status, body = get(conn, f"{path}?range=7&dates={self.today_day}")
+                    self.assertEqual((status, body["dates"]), (200, [self.today_day]))
+                    status, body = get(conn, f"{path}?dates=not-a-date")
+                    self.assertEqual(status, 400)
+                    status, body = get(conn, f"{path}?range=7&dates=")
+                    self.assertEqual((status, body["dates"]), (200, None))
+            status, body = get(conn, f"/api/agents?range=7&dates={self.today_day}")
+            self.assertEqual(body["totals"]["tokens"], 3030)
+            conn.close()
+        finally:
+            server.AUTH_ENABLED = auth
             server.Handler.log_message = quiet
             httpd.shutdown()
             httpd.server_close()

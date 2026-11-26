@@ -961,20 +961,56 @@ def range_since_ms(range_key: str) -> int:
     return int((time.time() - days * 86400) * 1000)
 
 
+MAX_DATES = 32  # 与 /api/days-hourly 的上限一致
+
+
+def parse_dates(raw: str) -> Optional[List[str]]:
+    """解析逗号分隔的本地日期（YYYY-MM-DD）：空值返回 None，格式不对抛 ValueError。"""
+    out = [x.strip() for x in (raw or "").split(",") if x.strip()]
+    for d in out:
+        datetime.strptime(d, "%Y-%m-%d")
+    return out[:MAX_DATES] or None
+
+
+def selection_window(range_key: str, dates: Optional[List[str]] = None) -> Tuple[int, Optional[set]]:
+    """时间筛选窗口：返回 (窗口起点毫秒, 选中日期集合)。
+
+    给出 dates 时忽略 range，条目按「本地日期 ∈ dates」筛选，起点取最早选中日的本地零点。
+    """
+    if not dates:
+        return range_since_ms(range_key), None
+    earliest = min(datetime.strptime(d, "%Y-%m-%d") for d in dates)
+    return int(earliest.timestamp() * 1000), set(dates)
+
+
+def _time_in_window(t: int, since: int, wanted: Optional[set]) -> bool:
+    return day_key(t) in wanted if wanted is not None else t >= since
+
+
+def dates_label(dates: List[str]) -> str:
+    """日期窗口的标签，与前端 selectionLabel() 同格式。"""
+    if len(dates) == 1:
+        return dates[0]
+    if len(dates) <= 3:
+        return ", ".join(dates)
+    return f"{dates[0]} … {dates[-1]} · {len(dates)} 天"
+
+
 def _agent_matches(agent: str, agent_filter: str) -> bool:
     """agent 过滤支持前缀（?agent=checkpoint-writer 也能命中 checkpoint-writer-1）。"""
     return not agent_filter or agent == agent_filter or agent.startswith(agent_filter)
 
 
-def aggregate_agents(range_key: str) -> Dict[str, Any]:
-    """按 agent 维度汇总：用量、命中率、会话数、分模型明细。"""
-    cache_key = f"agents:{range_key}"
+def aggregate_agents(range_key: str, dates: Optional[List[str]] = None) -> Dict[str, Any]:
+    """按 agent 维度汇总：用量、命中率、会话数、分模型明细。给出 dates 时忽略 range。"""
+    dates = dates[:MAX_DATES] if dates else None
+    cache_key = f"agents:{range_key}" + (f"|{','.join(dates)}" if dates else "")
     hit = cache_get(cache_key)
     if hit is not None:
         return hit
 
-    since = range_since_ms(range_key)
-    items = [it for it in load_full_items() if it["time"] >= since] if since else list(load_full_items())
+    since, wanted = selection_window(range_key, dates)
+    items = [it for it in load_full_items() if _time_in_window(it["time"], since, wanted)]
 
     stats: Dict[str, Dict[str, int]] = defaultdict(new_mstat)
     sess_of: Dict[str, set] = defaultdict(set)
@@ -1020,7 +1056,8 @@ def aggregate_agents(range_key: str) -> Dict[str, Any]:
     result = {
         "ok": True,
         "range": range_key or "7",
-        "range_label": range_label(range_key),
+        "range_label": dates_label(dates) if dates else range_label(range_key),
+        "dates": dates,
         "generated_at": int(time.time() * 1000),
         "since": since,
         "totals": {
@@ -1060,15 +1097,19 @@ def _first_round_bucket(hit: int) -> str:
     return "high"
 
 
-def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]:
+def first_round_report(
+    range_key: str, agent_filter: str = "", dates: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """首轮维度：每个 (session, agent) 在范围窗口内的真首轮命中分布。
 
     口径（写死，见 README「首轮口径」）：
       - 首轮 = 同一 (session_id, agent_id) 里按时间第一条 total>0 的 assistant 消息
       - 首轮在「全部历史」上定位，窗口只筛结果 ⇒ 老会话不会被重复当成新首轮
       - 命中率 = cache_read / (cache_read + cache_write + input)，三数均为服务商上报值
+    给出 dates 时忽略 range：dates 只筛首轮发生的时间，不改变哪条是首轮。
     """
-    cache_key = f"fr:{range_key}:{agent_filter}"
+    dates = dates[:MAX_DATES] if dates else None
+    cache_key = f"fr:{range_key}:{agent_filter}" + (f"|{','.join(dates)}" if dates else "")
     hit_cached = cache_get(cache_key)
     if hit_cached is not None:
         return hit_cached
@@ -1076,13 +1117,13 @@ def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]
     load_full_items()
     first = _FULL_FIRST or {}
     pending_map = _FULL_PENDING or {}
-    since = range_since_ms(range_key)
+    since, wanted = selection_window(range_key, dates)
     now_ms = int(time.time() * 1000)
 
     rounds = [
         it
         for (sid, agent), it in first.items()
-        if it["time"] >= since and _agent_matches(agent, agent_filter)
+        if _time_in_window(it["time"], since, wanted) and _agent_matches(agent, agent_filter)
     ]
     rounds.sort(key=lambda x: x["time"])
 
@@ -1148,7 +1189,7 @@ def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]
         first_item = first.get((sid, agent))
         cutoff = first_item["time"] if first_item else now_ms + 1
         for t in times:
-            if t < since or t > now_ms or t >= cutoff:
+            if not _time_in_window(t, since, wanted) or t > now_ms or t >= cutoff:
                 continue
             pending_rows += 1
             pending_groups.add((sid, agent))
@@ -1158,7 +1199,8 @@ def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]
     result = {
         "ok": True,
         "range": range_key or "7",
-        "range_label": range_label(range_key),
+        "range_label": dates_label(dates) if dates else range_label(range_key),
+        "dates": dates,
         "generated_at": int(time.time() * 1000),
         "agent": agent_filter,
         "since": since,
@@ -1204,17 +1246,18 @@ def _root_session_id(sid: str, sessions: Dict[str, Any]) -> str:
         cur = parent
 
 
-def sessions_by_root(range_key: str) -> Dict[str, Any]:
-    """会话用量按根会话归并：子会话（checkpoint writer）的消耗并入父会话。"""
-    cache_key = f"root:{range_key}"
+def sessions_by_root(range_key: str, dates: Optional[List[str]] = None) -> Dict[str, Any]:
+    """会话用量按根会话归并：子会话（checkpoint writer）的消耗并入父会话。给出 dates 时忽略 range。"""
+    dates = dates[:MAX_DATES] if dates else None
+    cache_key = f"root:{range_key}" + (f"|{','.join(dates)}" if dates else "")
     hit = cache_get(cache_key)
     if hit is not None:
         return hit
 
     load_full_items()
     sessions = (_FULL_META or {}).get("sessions") or {}
-    since = range_since_ms(range_key)
-    items = [it for it in load_full_items() if it["time"] >= since] if since else list(load_full_items())
+    since, wanted = selection_window(range_key, dates)
+    items = [it for it in load_full_items() if _time_in_window(it["time"], since, wanted)]
 
     root_of = {sid: _root_session_id(sid, sessions) for sid in {it["session_id"] for it in items}}
 
@@ -1327,7 +1370,8 @@ def sessions_by_root(range_key: str) -> Dict[str, Any]:
     result = {
         "ok": True,
         "range": range_key or "7",
-        "range_label": range_label(range_key),
+        "range_label": dates_label(dates) if dates else range_label(range_key),
+        "dates": dates,
         "generated_at": int(time.time() * 1000),
         "since": since,
         "totals": {
@@ -2362,10 +2406,19 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": str(e)}, 500)
                 return
 
+            # 三个维度接口共用：dates 给出时忽略 range
+            sel_dates: Optional[List[str]] = None
+            if path in ("/api/agents", "/api/first-round", "/api/sessions-root"):
+                try:
+                    sel_dates = parse_dates(qs.get("dates", ""))
+                except ValueError:
+                    self._json({"ok": False, "error": "bad dates, expect YYYY-MM-DD"}, 400)
+                    return
+
             if path == "/api/agents":
                 rk = qs.get("range", "7")
                 try:
-                    self._json(aggregate_agents(rk))
+                    self._json(aggregate_agents(rk, sel_dates))
                 except FileNotFoundError as e:
                     self._json({"ok": False, "error": str(e)}, 503)
                 except Exception as e:
@@ -2376,7 +2429,7 @@ class Handler(BaseHTTPRequestHandler):
                 rk = qs.get("range", "7")
                 agent = (qs.get("agent", "") or "").strip()
                 try:
-                    self._json(first_round_report(rk, agent))
+                    self._json(first_round_report(rk, agent, sel_dates))
                 except FileNotFoundError as e:
                     self._json({"ok": False, "error": str(e)}, 503)
                 except Exception as e:
@@ -2386,7 +2439,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/sessions-root":
                 rk = qs.get("range", "7")
                 try:
-                    self._json(sessions_by_root(rk))
+                    self._json(sessions_by_root(rk, sel_dates))
                 except FileNotFoundError as e:
                     self._json({"ok": False, "error": str(e)}, 503)
                 except Exception as e:
