@@ -29,6 +29,12 @@
     return [5, 10, 15, 30, 60].includes(n) ? n : 15;
   }
 
+  // 每页条数：0 = 全部。旧的「5 条」不再提供，与首轮明细统一为 10 / 20 / 50
+  function readPageSize(key) {
+    const n = Number(localStorage.getItem(key) || 10);
+    return [0, 10, 20, 50].includes(n) ? n : 10;
+  }
+
   function readShiftMulti() {
     return localStorage.getItem("mimo-ts-shift-multi") !== "0";
   }
@@ -67,7 +73,11 @@
     sort: localStorage.getItem("mimo-ts-sort") || "last",
     modelFilter: "",
     projectFilter: "",
-    sessionLimit: Number(localStorage.getItem("mimo-ts-limit") || 5),
+    sessionLimit: readPageSize("mimo-ts-limit"),
+    sessionPage: 1,
+    sessionPageKey: "",
+    sessionsTotal: 0,
+    sessionsReqId: 0,
     modelLimit: Number(localStorage.getItem("mimo-ts-model-limit") || 5),
     projectLimit: Number(localStorage.getItem("mimo-ts-project-limit") || 5),
     modelSort: localStorage.getItem("mimo-ts-model-sort") || "tokens",
@@ -262,10 +272,13 @@
     const btn = $("#btn-refresh");
     if (btn) btn.disabled = true;
     try {
-      const data = await fetchJSON(`/api/overview?range=${encodeURIComponent(state.range)}`);
+      syncSessionsPageKey();
+      const data = await fetchJSON(
+        `/api/overview?range=${encodeURIComponent(state.range)}&${sessionQuery()}`
+      );
       state.data = data;
       if (data.ok) {
-        state.sessions = data.by_session || [];
+        applySessionsPage(data);
         renderAll(data);
         hideBanner();
         loadDimensions();
@@ -379,8 +392,7 @@
       renderModels(data.by_model || []);
       renderProjects(data.by_project || []);
       populateModelFilter(data);
-      state.sessions = data.by_session || [];
-      renderSessions();
+      applySessionsPage(data);
       const msub0 = $("#models-sub");
       const psub0 = $("#projects-sub");
       const ssub0 = $("#sessions-sub");
@@ -654,8 +666,7 @@
     renderModels(data.by_model || []);
     renderProjects(data.by_project || []);
     populateModelFilter(data);
-    state.sessions = data.by_session || [];
-    renderSessions();
+    applySessionsPage(data);
     const msub = $("#models-sub");
     const psub = $("#projects-sub");
     const ssub = $("#sessions-sub");
@@ -668,9 +679,8 @@
     const label = selectionLabel(state.selectedDayDates);
     renderModels(d.by_model || []);
     renderProjects(d.by_project || []);
-    populateModelFilter({ by_model: d.by_model || [], by_project: d.by_project || [] });
-    state.sessions = d.by_session || [];
-    renderSessions();
+    populateModelFilter({ by_model: d.by_model || [], by_project: d.by_project || [], project_names: d.project_names });
+    applySessionsPage(d);
     const msub = $("#models-sub");
     const psub = $("#projects-sub");
     const ssub = $("#sessions-sub");
@@ -691,8 +701,11 @@
     if (modelsEl) modelsEl.innerHTML = "";
     const reqId = ++state.hourlyReqId;
     loadDimensions();
+    syncSessionsPageKey();
     try {
-      const d = await fetchJSON(`/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}`);
+      const d = await fetchJSON(
+        `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${sessionQuery()}`
+      );
       if (reqId !== state.hourlyReqId || JSON.stringify(state.selectedDayDates) !== JSON.stringify(dates)) return;
       if (!d.ok) return;
       renderDayDetailPanel(
@@ -1364,7 +1377,7 @@
     }
     const psel = $("#session-project-filter");
     if (psel) {
-      const projects = (data.by_project || []).map((p) => p.name).filter(Boolean);
+      const projects = (data.project_names || (data.by_project || []).map((p) => p.name)).filter(Boolean);
       const cur = state.projectFilter;
       psel.innerHTML =
         `<option value="">全部项目</option>` +
@@ -1379,46 +1392,85 @@
     if (sortSel) sortSel.value = state.sort || "last";
   }
 
-  function filteredSessions() {
-    let list = state.sessions.slice();
-    const q = state.search.trim().toLowerCase();
-    if (q) {
-      list = list.filter((s) =>
-        [s.title, s.project_name, s.directory, s.id, (s.models || []).map((m) => m.model).join(" ")]
-          .join(" ")
-          .toLowerCase()
-          .includes(q)
-      );
+  // 会话用量的口径：过滤 / 排序 / 分页都在服务端做，这里只负责拼参数
+  function sessionPageKey() {
+    return [
+      state.range,
+      state.selectedDayDates.join(","),
+      state.search.trim(),
+      state.projectFilter,
+      state.modelFilter,
+      state.sort,
+      state.sessionLimit,
+    ].join("|");
+  }
+
+  // 口径变了先回到第 1 页，再拿新 offset 去请求
+  function syncSessionsPageKey() {
+    const key = sessionPageKey();
+    if (key !== state.sessionPageKey) {
+      state.sessionPageKey = key;
+      state.sessionPage = 1;
     }
-    if (state.modelFilter) {
-      list = list.filter((s) => (s.models || []).some((m) => m.model === state.modelFilter));
-    }
-    if (state.projectFilter) {
-      list = list.filter((s) => s.project_name === state.projectFilter);
-    }
-    list = sortRankItems(list, state.sort);
-    return list;
+  }
+
+  function sessionQuery() {
+    const size = state.sessionLimit;
+    const params = new URLSearchParams({
+      session_limit: String(size),
+      session_offset: String(size > 0 ? Math.max(0, state.sessionPage - 1) * size : 0),
+      session_sort: state.sort || "last",
+    });
+    const q = state.search.trim();
+    if (q) params.set("session_q", q);
+    if (state.projectFilter) params.set("session_project", state.projectFilter);
+    if (state.modelFilter) params.set("session_model", state.modelFilter);
+    return params.toString();
+  }
+
+  function applySessionsPage(data) {
+    state.sessions = data.by_session || [];
+    state.sessionsTotal = Number(data.sessions_total || 0);
+    renderSessions();
+  }
+
+  async function reloadSessions() {
+    syncSessionsPageKey();
+    const reqId = ++state.sessionsReqId;
+    const dates = state.selectedDayDates;
+    const url = dates.length
+      ? `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${sessionQuery()}`
+      : `/api/overview?range=${encodeURIComponent(state.range)}&${sessionQuery()}`;
+    try {
+      const data = await fetchJSON(url);
+      if (reqId !== state.sessionsReqId) return; // 连改筛选时丢掉过期响应
+      if (data.ok) applySessionsPage(data);
+    } catch (_) {}
   }
 
   function renderSessions() {
     const tbody = $("#session-tbody");
     const empty = $("#session-empty");
-    const foot = $("#table-foot");
-    const moreBtn = $("#btn-more");
     if (!tbody) return;
-    const all = filteredSessions();
-    const limit = state.sessionLimit;
-    const list = limit > 0 ? all.slice(0, limit) : all;
+    const total = state.sessionsTotal;
+    const size = state.sessionLimit;
+    const pages = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+    if (state.sessionPage > pages) {
+      // 行数变少（切范围、加筛选）后页码越界：收到最后一页再画
+      state.sessionPage = pages;
+      reloadSessions();
+      return;
+    }
+    renderPager("session", total, state.sessionPage, pages);
 
-    if (!all.length) {
+    if (!state.sessions.length) {
       tbody.innerHTML = "";
-      if (empty) empty.hidden = false;
-      if (foot) foot.hidden = true;
+      if (empty) empty.hidden = total > 0;
       return;
     }
     if (empty) empty.hidden = true;
 
-    tbody.innerHTML = list
+    tbody.innerHTML = state.sessions
       .map((s) => {
         const models = (s.models || []).map((m) => m.model).join(" · ");
         return `
@@ -1452,22 +1504,6 @@
         }
       });
     });
-
-    if (foot && moreBtn) {
-      if (limit > 0 && all.length > limit) {
-        foot.hidden = false;
-        moreBtn.textContent = `显示更多（还有 ${all.length - limit} 条）`;
-        moreBtn.onclick = () => {
-          state.sessionLimit = 0;
-          localStorage.setItem("mimo-ts-limit", "0");
-          const sel = $("#session-limit");
-          if (sel) sel.value = "0";
-          renderSessions();
-        };
-      } else {
-        foot.hidden = true;
-      }
-    }
   }
 
   // ── agent / 首轮 / 会话归并 ────────────────────────────────
@@ -2344,30 +2380,37 @@
       "input",
       debounce((e) => {
         state.search = e.target.value || "";
-        renderSessions();
+        reloadSessions();
       }, 150)
     );
 
     $("#session-sort")?.addEventListener("change", (e) => {
       state.sort = e.target.value;
       localStorage.setItem("mimo-ts-sort", state.sort);
-      renderSessions();
+      reloadSessions();
     });
 
     $("#session-model-filter")?.addEventListener("change", (e) => {
       state.modelFilter = e.target.value || "";
-      renderSessions();
+      reloadSessions();
     });
 
     $("#session-project-filter")?.addEventListener("change", (e) => {
       state.projectFilter = e.target.value || "";
-      renderSessions();
+      reloadSessions();
     });
 
-    $("#session-limit")?.addEventListener("change", (e) => {
-      state.sessionLimit = Number(e.target.value) || 0;
-      localStorage.setItem("mimo-ts-limit", String(state.sessionLimit));
-      renderSessions();
+    bindPager("session", {
+      getPage: () => state.sessionPage,
+      go: (page) => {
+        state.sessionPage = page;
+        reloadSessions();
+      },
+      setSize: (value) => {
+        state.sessionLimit = value;
+        localStorage.setItem("mimo-ts-limit", String(state.sessionLimit));
+        reloadSessions();
+      },
     });
 
     $("#model-limit")?.addEventListener("change", (e) => {

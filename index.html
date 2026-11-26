@@ -243,13 +243,6 @@
               <option value="cache">按缓存</option>
               <option value="hit">按命中率</option>
             </select>
-            <select id="session-limit" class="select" aria-label="显示条数">
-              <option value="5" selected>5 条</option>
-              <option value="10">10 条</option>
-              <option value="20">20 条</option>
-              <option value="50">50 条</option>
-              <option value="0">全部</option>
-            </select>
           </div>
         </div>
         <div class="table-scroll">
@@ -270,10 +263,28 @@
             </tbody>
           </table>
         </div>
-        <div class="table-empty" id="session-empty" hidden>没有匹配的会话</div>
-        <div class="table-foot" id="table-foot" hidden>
-          <button class="btn ghost" id="btn-more">显示更多</button>
+        <div class="table-pager" id="session-pager" hidden>
+          <span id="session-page-info"></span>
+          <div class="table-pager-btns">
+            <span class="table-pager-nav" id="session-page-nav">
+              <button type="button" class="btn ghost" id="session-prev">上一页</button>
+              <span class="table-pager-nums" id="session-page-nums"></span>
+              <button type="button" class="btn ghost" id="session-next">下一页</button>
+            </span>
+            <select id="session-limit" class="select" aria-label="会话用量每页条数">
+              <option value="10" selected>10 条/页</option>
+              <option value="20">20 条/页</option>
+              <option value="50">50 条/页</option>
+              <option value="0">全部</option>
+            </select>
+            <label class="page-jump" id="session-jump">
+              跳至
+              <input type="text" id="session-page-jump" inputmode="numeric" autocomplete="off" aria-label="跳转到页码" />
+              页
+            </label>
+          </div>
         </div>
+        <div class="table-empty" id="session-empty" hidden>没有匹配的会话</div>
       </section>
 
       <!-- Agent 维度 + 首轮命中 -->

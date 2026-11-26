@@ -522,6 +522,8 @@ def page_session_block(resp: Dict[str, Any], qs: Dict[str, str]) -> Dict[str, An
     sessions, sessions_total = slice_page(sessions, s_limit, s_offset)
 
     projects = sort_rows(resp.get("by_project") or [], qs.get("project_sort", ""), "tokens")
+    # 项目榜分页后前端只剩当前页，筛选下拉需要全量项目名
+    project_names = [r.get("name") for r in projects if r.get("name")]
     p_limit = _paging_param(qs, "project_limit", DEFAULT_PROJECT_LIMIT)
     p_offset = _paging_param(qs, "project_offset", 0)
     projects, projects_total = slice_page(projects, p_limit, p_offset)
@@ -532,6 +534,7 @@ def page_session_block(resp: Dict[str, Any], qs: Dict[str, str]) -> Dict[str, An
         "by_project": projects,
         "sessions_total": sessions_total,
         "projects_total": projects_total,
+        "project_names": project_names,
     }
 
 

@@ -900,6 +900,13 @@ class ProjectPaginationTest(PagingFixtureMixin, unittest.TestCase):
             self.assertEqual(body["by_project"], [])
             self.assertEqual(body["projects_total"], 2)
 
+    def test_project_names_stay_complete_while_paged(self):
+        # 项目筛选下拉要用全量项目名，不能被分页切掉
+        with self._serve() as get:
+            _, body = get("/api/overview?range=all&project_limit=1&project_offset=0")
+        self.assertEqual(len(body["by_project"]), 1)
+        self.assertEqual(body["project_names"], ["a", "b"])
+
 
 class RootsPaginationTest(PagingFixtureMixin, unittest.TestCase):
     """会话归并表：limit / offset / q / sort + total。"""
