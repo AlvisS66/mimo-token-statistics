@@ -338,10 +338,10 @@
               <option value="mid">50–90%</option>
               <option value="high">90–100%</option>
             </select>
-            <select id="firstround-limit" class="select" aria-label="首轮明细条数">
-              <option value="10" selected>10 条</option>
-              <option value="20">20 条</option>
-              <option value="50">50 条</option>
+            <select id="firstround-limit" class="select" aria-label="首轮明细每页条数">
+              <option value="10" selected>每页 10 条</option>
+              <option value="20">每页 20 条</option>
+              <option value="50">每页 50 条</option>
               <option value="0">全部</option>
             </select>
           </div>
@@ -362,6 +362,13 @@
               <tr class="loading-row"><td colspan="6">加载中…</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="table-pager" id="firstround-pager" hidden>
+          <span id="firstround-page-info"></span>
+          <div class="table-pager-btns">
+            <button type="button" class="btn ghost" id="firstround-prev">上一页</button>
+            <button type="button" class="btn ghost" id="firstround-next">下一页</button>
+          </div>
         </div>
         <div class="table-empty" id="firstround-empty" hidden>没有匹配的首轮</div>
       </section>

@@ -1398,6 +1398,17 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
 }
 
 .table-scroll { overflow-x: auto; }
+.table-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.table-pager-btns { display: flex; gap: 6px; }
+.table-pager .btn { height: 28px; padding: 0 10px; font-size: 12px; }
 .data-table {
   width: 100%;
   border-collapse: collapse;

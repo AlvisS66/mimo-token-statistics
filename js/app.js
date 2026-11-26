@@ -95,6 +95,7 @@
     frSearch: "",
     frBucket: "",
     frLimit: Number(localStorage.getItem("mimo-ts-fr-limit") || 10),
+    frPage: 1,
     firstRound: null,
     rootsSearch: "",
     rootsLimit: Number(localStorage.getItem("mimo-ts-roots-limit") || 5),
@@ -1687,15 +1688,21 @@
     }
     rows.sort((a, b) => order[a.bucket] - order[b.bucket] || a.hit - b.hit || b.total - a.total);
 
+    // 「全部」(0) 一页画完；行数变少后页码可能越界（切范围、刷新），收到最后一页
+    const size = state.frLimit > 0 ? state.frLimit : rows.length;
+    const pages = size > 0 ? Math.max(1, Math.ceil(rows.length / size)) : 1;
+    if (state.frPage > pages) state.frPage = pages;
+    renderFirstRoundPager(rows.length, pages);
+
     if (!rows.length) {
       tbody.innerHTML = "";
       if (empty) empty.hidden = false;
       return;
     }
     if (empty) empty.hidden = true;
-    const limit = state.frLimit > 0 ? state.frLimit : rows.length;
+    const start = (state.frPage - 1) * size;
     tbody.innerHTML = rows
-      .slice(0, limit)
+      .slice(start, start + size)
       .map(
         (r) => `
         <tr tabindex="0" data-id="${escapeHtml(r.session_id)}">
@@ -1722,6 +1729,15 @@
         }
       });
     });
+  }
+
+  function renderFirstRoundPager(total, pages) {
+    const pager = $("#firstround-pager");
+    if (!pager) return;
+    pager.hidden = pages <= 1;
+    $("#firstround-page-info").textContent = `共 ${exact(total)} 条 · 第 ${state.frPage} / ${pages} 页`;
+    $("#firstround-prev").disabled = state.frPage <= 1;
+    $("#firstround-next").disabled = state.frPage >= pages;
   }
 
   function renderRoots() {
@@ -2321,6 +2337,15 @@
     $("#firstround-limit")?.addEventListener("change", (e) => {
       state.frLimit = Number(e.target.value) || 0;
       localStorage.setItem("mimo-ts-fr-limit", String(state.frLimit));
+      renderFirstRoundTable();
+    });
+
+    $("#firstround-prev")?.addEventListener("click", () => {
+      state.frPage -= 1;
+      renderFirstRoundTable();
+    });
+    $("#firstround-next")?.addEventListener("click", () => {
+      state.frPage += 1;
       renderFirstRoundTable();
     });
 
