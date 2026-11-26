@@ -1,6 +1,6 @@
 ---
 feature: session-drawer-scroll
-status: in-progress
+status: delivered
 updated: 2026-11-26
 source: feat/session-drawer-scroll
 ---
@@ -9,7 +9,11 @@ source: feat/session-drawer-scroll
 
 ## Report
 
-[Not finalized yet]
+**What was built** — 会话详情抽屉的「每次请求」从「只画最近 50 条」改成每批 50 条滚动加载：滚到底自动追加，顶部提示从 `已显示 50 / 995 条` 走成 `共 995 条`；追加只拼新卡片（`insertAdjacentHTML`），滚动位置不跳、已渲染卡片不重排；一批装不满一屏时继续追加，避免永远触不到底；关掉再打开回到 50 条。服务端删掉了 `session_detail()` 里 `turns[-200:]` 的静默截断——此前滚到底只能到 200 条（实测提示停在 `已显示 200 / 995 条`）。`/api/session` 的 `turns[]` 每条新增 `provider`（`data.providerID`）与 `variant`（`data.variant`，即思考强度），卡片改成 `模型名 + [服务商] + [思考 max]` 同一行（`variant` 缺失但有服务商时 `思考 默认`，两者都缺只有模型名）；「模型分布」每行与主面板「模型用量」每行也显示服务商（`models[]` / `by_model[]` 加 `providers`，按请求数降序、同数按名字，抽了 `provider_list()` 三处共用）。顺带两处加固：抽屉用 `state.drawerReqId` 让迟到的响应（包括失败）不再覆盖后开的会话、关闭时清空列表状态；`cache_set()` 写入时顺带清掉过期条目（会话明细现在单条最大约 0.5 MB，过期条目原先只在被再次读取时才回收）。版本串 `MiMoTokenStats/1.0.5`，补 `RELEASE_NOTES_v1.0.5.md`，README 的 `/api/session` 行写明返回全部请求与新增字段。
+
+**Verification** — `python -m unittest discover -s tests` → **72 tests OK**（13 s）；`node --check js/app.js` → OK。有头浏览器 6 套场景（临时服务 `127.0.0.1:8798` 服务本 worktree，脚本放系统临时目录、不进仓库）：① 995 条请求的会话首屏 50 条 → 滚到底逐批追加（`afterSecond=100`，滚动位置 4,932 保持）→ `共 995 条`，全程 1.1 s；② 最大会话 1,165 条同样通过（打开 105 ms，追加完 1.43 s）；③ 卡片 `lineOffsets` 实测 `[0,0]`（服务商 / 思考强度中线与模型名零偏差），`#drawer-turns .t-meta` 计数 0；④ 「模型分布」`deepseek-flash` 列出 `kg-newapi` + `deepseek` 两家，主面板「模型用量」7 天 / 30 天 / 选中日期三种口径每行都带服务商、`#project-list .t-chip` 计数 0；⑤ 深 / 浅主题对比度 服务商 5.59 / 3.93、思考强度 6.57 / 4.33，390 px 宽卡片与模型行均无横向溢出；⑥ 关掉再开回到 50 条、A 的迟到响应不覆盖 B（拖 2.5 s 反证：旧代码 B 的标题被换掉）、新请求 500 时计数清空且不残留旧卡片。三条关键修复都做了「旧实现红 / 新实现绿」：`turns` 截断用 210 条 fixture 用例锁（旧实现回 200）；失败路径用 `page.route` 造 500（旧代码红在「计数没清空：已显示 50 / 995 条」）；排序用例换成 `p-z`×2 + `p-a`×1（把 `provider_list` 变异成纯字典序即红，增量复审做了不改文件的变异反证，`MUTANT_KILLED`）。两轮独立评审：服务端侧 PASS WITH NITS、前端侧 PASS WITH NITS、增量复审 PASS WITH NITS，无 critical，全部 major 已修并附反证。
+
+**Known trade-offs** — `_CACHE` 仍无条数 / 字节上限（已加过期清扫；单条最大约 0.5 MB，`/api/session` 的唯一调用点是点开抽屉，自动刷新与 `prefetchRanges` 都不碰它）；抽屉 `aria-modal="true"` 但不接管焦点、也不锁焦点，键盘能在抽屉开着时再次打开别的会话（既有问题，也是失败路径之前唯一的可达方式，本次只是把行为做对）；「模型分布」只加服务商不加思考强度（`variant` 逐条不同，按模型聚合成一个值会误导）；真实库的 `variant` 有 `max` / `xhigh` / `high` / `medium` 与缺失五种取值，卡片照原值显示 `思考 <variant>`。
 
 ## [S1] Problem
 
@@ -101,3 +105,4 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 2026-11-26 服务端侧独立评审 PASS WITH NITS：排序用例原先的期望值与「纯字典序」同构（把 `provider_list` 改成 `sorted(counts)` 仍全绿）⇒ 换成「`p-z` 出现 2 次 + `p-a` 1 次」的数据，断言 `[:2] == ["p-z", "p-a"]`，再把 helper 换回字典序即可复现 `['p-a','p-z']` 的失败；另把 spec 里「`variant` 只有 max」的错话按实库分布改正。
 - 2026-11-26 前端侧独立评审 PASS WITH NITS：确认滚动加载边界（`fillDrawerViewport` 40 次上界 + `appendDrawerTurns` 返 false 双保险）、XSS（所有 sink 都过 `escapeHtml`）、CSS（`.t-chip` 全局无旧定义、`.rank-label`/`.nm` 的 `min-width:0` 让省略号仍生效）均无问题；major 指出失败路径没护栏 ⇒ 请求前归零 state、`catch` 也判 `drawerReqId`、打开时清掉旧计数。用 `page.route` 把新会话的响应改成 500 复现：旧实现停在「加载失败：boom」但计数仍是旧会话的 `已显示 50 / 995 条`（新实现清空）；`restored identical: True`。
 - 2026-11-26 增量复审（只看 `dbdc8eb`）PASS WITH NITS，并确认前面两轮的修复没引入新问题（`#drawer-turns-hint` 是 `#drawer-turns` 的兄弟节点，重写占位不会毁掉提示；加载中 / 失败时滚动走 `from=to=0` 直接返回 false）；另用不改文件的变异反证确认排序用例有牙。按 nit 删掉恒等于 `turns.length` 的 `state.drawerTurnTotal`，spec 两处措辞补齐。
+- 2026-11-26 定稿：status → delivered。9 个提交（`162248c` 服务端字段 / `1494562` 滚动加载与卡片同行 / `2079be7` 版本 1.0.5 / `d1d71b5` 迟到响应守卫 / `773e142` 主面板模型用量服务商 / `00df589` 缓存过期清扫 / `73417cd` 关闭清空状态 / `dbdc8eb` 失败路径守卫与测试补牙 / `b92d267` 去掉冗余字段），72 tests OK，6 套有头场景全绿，三轮独立评审均 PASS（无 critical）。
