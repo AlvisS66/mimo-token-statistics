@@ -79,7 +79,6 @@
     hourlyDay: null,
     hourlyReqId: 0,
     dimsReqId: 0,
-    frReqId: 0,
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
@@ -1500,15 +1499,19 @@
     renderRoots();
   }
 
-  async function loadFirstRound() {
-    // 切换 agent 筛选是独立调用、不经过 dimsReqId：连改两次时先发的响应后到，会把结果覆盖成上一个 agent
-    const frReqId = ++state.frReqId;
-    const dimsReqId = state.dimsReqId;
+  function firstRoundQuery() {
     const range = encodeURIComponent(state.range);
     const agent = state.frAgent ? `&agent=${encodeURIComponent(state.frAgent)}` : "";
+    return `range=${range}${agent}${dimsQuery()}`;
+  }
+
+  async function loadFirstRound() {
+    // 响应回来时按当时的口径（范围 / 日期 / agent）重新对一遍：连改两次 agent 时，先发的响应会被
+    // 后一次的口径挡掉；口径没变的重复请求（与维度加载撞上时）谁先到都能直接用
+    const query = firstRoundQuery();
     try {
-      const d = await fetchJSON(`/api/first-round?range=${range}${agent}${dimsQuery()}`);
-      if (frReqId !== state.frReqId || dimsReqId !== state.dimsReqId) return;
+      const d = await fetchJSON(`/api/first-round?${query}`);
+      if (query !== firstRoundQuery()) return;
       if (d.ok) state.firstRound = d;
     } catch (_) {}
   }

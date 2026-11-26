@@ -73,7 +73,9 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 
 ### S2.9 首轮加载的竞态（评审跟进，合并前追加）
 
-`#firstround-agent` 的 change 处理独立调用 `loadFirstRound()`，只受 `dimsReqId` 约束——连改两次 agent 时，先发的响应后到会覆盖后发的结果：下拉显示 B，表格却是 A。`loadFirstRound` 自带 `frReqId`，响应同时对照「后一次首轮加载」与「后一次维度加载」，任一过期即丢弃。
+`#firstround-agent` 的 change 处理独立调用 `loadFirstRound()`，原先只受 `dimsReqId` 约束——连改两次 agent 时，先发的响应后到会覆盖后发的结果：下拉显示 B，表格却是 A。
+
+`loadFirstRound` 在响应回来时按当时的范围 / 日期 / agent 重新对一遍请求口径，对不上即丢弃。按口径而不是按先后次序判过期：维度加载进行中切换 agent 时，独立的首次请求与维度加载随后发出的请求口径相同，谁先到都能直接用，不必等后一次。
 
 ### S2.10 日期模式下保留 agent 筛选（评审跟进，合并前追加）
 
@@ -102,7 +104,7 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - [x] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 - [x] T9: 版本串升 `1.0.3` + `RELEASE_NOTES_v1.0.3.md` — acceptance: `server.py` 中不再出现 `1.0.2`；发布说明覆盖本次全部接口变更 (covers: S2.7) (depends: T8)
 - [x] T10: 静态路由只放行 `assets` / `css` / `js` 三个目录 — acceptance: 测试断言 `_resolve_static("css/../server.py")` 为 `None` 而 `css/style.css` 正常；未鉴权请求 `/css/../server.py`、`/assets/../index.html`、`/js/../README.md` 均回 403，`/css/style.css` 回 200 (covers: S2.8)
-- [x] T11: `loadFirstRound` 加 `frReqId`，覆盖 agent 下拉连改的竞态 — acceptance: 浏览器把 `agent=checkpoint-writer-1` 的首轮响应拖慢 1.5 s、随即改选 `main`，慢响应到达后表格仍只含 `main`（改动前会变成 `checkpoint-writer-1`） (covers: S2.9)
+- [x] T11: `loadFirstRound` 按请求口径判过期，覆盖 agent 下拉连改的竞态 — acceptance: 浏览器把 `agent=checkpoint-writer-1` 的首轮响应拖慢 1.5 s、随即改选 `main`，慢响应到达后表格仍只含 `main`（改动前会变成 `checkpoint-writer-1`）；维度加载卡在 `/api/agents` 时切换到 `main`，首个 `main` 响应到达即更新表格，不等待后一次同口径请求 (covers: S2.9)
 - [x] T12: 日期模式下保留当日无数据的 agent 筛选 — acceptance: 选 `checkpoint-writer-1` 后点 2026-11-23（当天只有 `main` 有数据），下拉仍为 `checkpoint-writer-1` 并带「所选日期无数据」标注、表格显示空状态；取消日期后筛选仍是 `checkpoint-writer-1`（改动前两处都被清成「全部 agent」） (covers: S2.10)
 
 ## Journey log
@@ -136,3 +138,4 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - **T11–T13 的基线**：三项都写不了单测（仓库没有 JS 测试框架），证据改成有头浏览器对照——先在未改动的前端（`e1291cd`）上跑一遍留底：拖慢先发的响应后，表格变成 `checkpoint-writer-1` 而下拉是 `main`；选 `checkpoint-writer-1` 再点 2026-11-23，筛选被清空；选中日期后点一次刷新，`/api/agents` 发了 2 次。改完后跑同一个脚本对照。
 - **T11**：加 `frReqId` 后，慢响应到达时表格仍是 `main`；T12 / T13 的读数与基线相同，说明这项改动没有波及它们。
 - **T12**：是否保留下拉选项，看的是响应自带的 `dates`，而不是「当前有没有选中日期」——维度接口请求失败时 `state.agents` 还是区间的那份，按后者判断会给它错贴「所选日期无数据」的标注。
+- **T11 补遗**：第一版用 `frReqId` 按「先后次序」判过期，推演时发现过严——维度加载正卡在 `/api/agents` 上时切换 agent，独立的首次请求与维度加载随后发出的请求口径相同，先到的正确响应会被后发的同口径请求挤掉，表格得多等一次往返（浏览器实测：切换后 2.5 s 表格仍是上一个 agent）。改为响应回来时按当时的范围 / 日期 / agent 重新对一遍口径，同口径的响应不再丢弃；`frReqId` 随之删除，不新增状态。
