@@ -961,7 +961,7 @@ def range_since_ms(range_key: str) -> int:
     return int((time.time() - days * 86400) * 1000)
 
 
-MAX_DATES = 32  # 与 /api/days-hourly 的上限一致
+MAX_DATES = 32  # 维度接口与 /api/days-hourly 共用的选中日期上限
 
 
 def parse_dates(raw: str) -> Optional[List[str]]:
@@ -1792,7 +1792,7 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
 
 def get_days_hourly(dates: List[str]) -> Dict[str, Any]:
     """多天合并后的 24 小时分模型用量（Shift 多选日历）。"""
-    dates = [d for d in dates if d]
+    dates = [d for d in dates if d][:MAX_DATES]
     cache_key = f"days:{','.join(sorted(set(dates)))}"
     hit = cache_get(cache_key)
     if hit is not None:
@@ -1807,7 +1807,7 @@ def get_days_hourly(dates: List[str]) -> Dict[str, Any]:
     day_model_tot: Dict[str, Dict[str, int]] = defaultdict(new_mstat)
     total = turns_n = t_in = t_out = t_cr = t_cw = 0
 
-    for ds in dates[:32]:  # 防过多
+    for ds in dates:
         try:
             day = datetime.strptime(ds, "%Y-%m-%d")
         except ValueError:
@@ -1885,8 +1885,8 @@ def get_days_hourly(dates: List[str]) -> Dict[str, Any]:
 
     result = {
         "ok": True,
-        "dates": dates[:32],
-        "day_count": len(dates[:32]),
+        "dates": dates,
+        "day_count": len(dates),
         "total": total,
         "total_fmt": format_token_lx(total),
         "turns": turns_n,
@@ -1904,7 +1904,7 @@ def get_days_hourly(dates: List[str]) -> Dict[str, Any]:
         "hourly_models": top_models + ["其他"],
         "peak_hour": max(hourly, key=lambda x: x["tokens"])["hour"] if any(h["tokens"] for h in hourly) else None,
     }
-    result.update(aggregate_dates_ranks(sorted(set(dates[:32]))))
+    result.update(aggregate_dates_ranks(sorted(set(dates))))
     cache_set(cache_key, result)
     return result
 

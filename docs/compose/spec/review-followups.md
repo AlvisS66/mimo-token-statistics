@@ -83,6 +83,11 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 
 区分两种列表：响应自带 `dates`（按日期筛过）时，当前 agent 不在列表里则保留下拉选项并标注「所选日期无数据」，表格照常显示空状态；不带 `dates`（区间）时沿用原规则校正。回到区间后该 agent 若仍无数据，筛选照旧被清空。
 
+### S2.11 两处清理（评审跟进，合并前追加）
+
+- `get_days_hourly` 四处裸写 `[:32]`，而 `MAX_DATES` 的注释自称与它一致：改为在入口截断一次，缓存键也随之按截断后的日期计算（超过上限时，键与实际计算的范围才对得上）。
+- 有选中日期时，每次刷新都会从日详情同步（`syncDaysDetail`）和总览加载（`loadOverview`）各调一次 `loadDimensions()`，同窗口发两套请求、一套被 `dimsReqId` 丢弃。`loadDimensions` 改为按「范围 + 选中日期」记住进行中的加载，同窗口的再次调用共用同一个 Promise。
+
 ## [S3] Out of Scope
 
 - 密码持久化（需单独决定存储位置与哈希方案）。
@@ -106,6 +111,7 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - [x] T10: 静态路由只放行 `assets` / `css` / `js` 三个目录 — acceptance: 测试断言 `_resolve_static("css/../server.py")` 为 `None` 而 `css/style.css` 正常；未鉴权请求 `/css/../server.py`、`/assets/../index.html`、`/js/../README.md` 均回 403，`/css/style.css` 回 200 (covers: S2.8)
 - [x] T11: `loadFirstRound` 按请求口径判过期，覆盖 agent 下拉连改的竞态 — acceptance: 浏览器把 `agent=checkpoint-writer-1` 的首轮响应拖慢 1.5 s、随即改选 `main`，慢响应到达后表格仍只含 `main`（改动前会变成 `checkpoint-writer-1`）；维度加载卡在 `/api/agents` 时切换到 `main`，首个 `main` 响应到达即更新表格，不等待后一次同口径请求 (covers: S2.9)
 - [x] T12: 日期模式下保留当日无数据的 agent 筛选 — acceptance: 选 `checkpoint-writer-1` 后点 2026-11-23（当天只有 `main` 有数据），下拉仍为 `checkpoint-writer-1` 并带「所选日期无数据」标注、表格显示空状态；取消日期后筛选仍是 `checkpoint-writer-1`（改动前两处都被清成「全部 agent」） (covers: S2.10)
+- [x] T13: `get_days_hourly` 复用 `MAX_DATES`；同窗口 `loadDimensions` 去重 — acceptance: 测试断言 `get_days_hourly` 传 40 个日期时只处理 `MAX_DATES` 个（把 `MAX_DATES` 临时改成 20，旧实现失败、新实现通过），`server.py` 中不再出现 `[:32]`；浏览器选中日期后点一次刷新，`/api/agents` 只发 1 次（改动前 2 次），日期连点（11-25 的响应拖慢）三面板仍停在 11-26 (covers: S2.11)
 
 ## Journey log
 
@@ -139,3 +145,4 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - **T11**：加 `frReqId` 后，慢响应到达时表格仍是 `main`；T12 / T13 的读数与基线相同，说明这项改动没有波及它们。
 - **T12**：是否保留下拉选项，看的是响应自带的 `dates`，而不是「当前有没有选中日期」——维度接口请求失败时 `state.agents` 还是区间的那份，按后者判断会给它错贴「所选日期无数据」的标注。
 - **T11 补遗**：第一版用 `frReqId` 按「先后次序」判过期，推演时发现过严——维度加载正卡在 `/api/agents` 上时切换 agent，独立的首次请求与维度加载随后发出的请求口径相同，先到的正确响应会被后发的同口径请求挤掉，表格得多等一次往返（浏览器实测：切换后 2.5 s 表格仍是上一个 agent）。改为响应回来时按当时的范围 / 日期 / agent 重新对一遍口径，同口径的响应不再丢弃；`frReqId` 随之删除，不新增状态。
+- **T13**：`MAX_DATES` 的测试在默认值下新旧实现都过（纯重构），是否有牙是用「把常量临时改成 20」验证的——旧实现写死 32 会红。同窗口去重后，单次刷新的 `/api/agents` 由 2 次降到 1 次；去重包装动的是 `loadDimensions` 本身，所以把 T7 的日期连点竞态（11-25 的响应拖慢 1.5 s）重新跑了一遍，三面板仍停在 11-26。

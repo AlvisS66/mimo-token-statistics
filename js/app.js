@@ -79,6 +79,7 @@
     hourlyDay: null,
     hourlyReqId: 0,
     dimsReqId: 0,
+    dimsInflight: null,
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
@@ -1478,7 +1479,18 @@
     return data?.dates?.length ? selectionLabel(data.dates) : data?.range_label || "";
   }
 
-  async function loadDimensions() {
+  // 同一窗口的加载共用一次请求：有选中日期时，每次刷新都会从日详情同步和总览加载各走到这里一次
+  function loadDimensions() {
+    const key = `${state.range}|${state.selectedDayDates.join(",")}`;
+    if (state.dimsInflight?.key === key) return state.dimsInflight.promise;
+    const promise = fetchDimensions().finally(() => {
+      if (state.dimsInflight?.promise === promise) state.dimsInflight = null;
+    });
+    state.dimsInflight = { key, promise };
+    return promise;
+  }
+
+  async function fetchDimensions() {
     const reqId = ++state.dimsReqId;
     const range = encodeURIComponent(state.range);
     const dates = dimsQuery();
