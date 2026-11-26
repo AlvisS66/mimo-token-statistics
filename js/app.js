@@ -1473,9 +1473,9 @@
     return dates.length ? `&dates=${encodeURIComponent(dates.join(","))}` : "";
   }
 
-  // 副标题：选中日期时跟随日历，否则用接口回的区间标签
+  // 副标题跟着实际展示的数据走：数据属于选中日期就显示日期，否则用接口回的区间标签
   function dimsLabel(data) {
-    return state.selectedDayDates.length ? selectionLabel(state.selectedDayDates) : data?.range_label || "";
+    return data?.dates?.length ? selectionLabel(data.dates) : data?.range_label || "";
   }
 
   async function loadDimensions() {

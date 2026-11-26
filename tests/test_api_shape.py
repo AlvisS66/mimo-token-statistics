@@ -20,6 +20,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -254,7 +255,9 @@ class RangeWindowTest(FixtureMixin, unittest.TestCase):
         self.assertEqual(server.range_since_ms("all"), 0)
 
     def test_today_is_local_midnight(self):
-        expected = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+        # 从日期键反推零点，而不是照抄生产里的 replace(hour=0, …)
+        today = server.day_key(int(time.time() * 1000))
+        expected = int(datetime.strptime(today, "%Y-%m-%d").timestamp() * 1000)
         self.assertEqual(server.range_since_ms("today"), expected)
 
     def test_n_days_back(self):
@@ -379,6 +382,26 @@ class DatesSelectionTest(FixtureMixin, unittest.TestCase):
                 self.assertIsNone(again["dates"])
                 self.assertEqual(again, base)
                 self.assertNotEqual(picked["totals"]["tokens"], base["totals"]["tokens"])
+
+    def test_cache_key_cannot_be_forged(self):
+        # range / agent 是用户输入：缓存键若靠分隔符拼接，"7|2026-11-26" 能命中 dates 模式的缓存
+        server.aggregate_agents("7", dates=[self.today_day])
+        server.sessions_by_root("7", dates=[self.today_day])
+        server.first_round_report("7", "", dates=[self.today_day])
+        forged_agents = server.aggregate_agents(f"7|{self.today_day}")
+        self.assertIsNone(forged_agents["dates"])
+        self.assertEqual(forged_agents["totals"]["tokens"], 12100)
+        forged_roots = server.sessions_by_root(f"7|{self.today_day}")
+        self.assertIsNone(forged_roots["dates"])
+        self.assertEqual(forged_roots["totals"]["tokens"], 12100)
+        forged_fr = server.first_round_report("7", f"|{self.today_day}")
+        self.assertIsNone(forged_fr["dates"])
+        self.assertEqual(forged_fr["totals"]["n"], 0)
+
+    def test_agent_filter_combines_with_dates(self):
+        res = server.first_round_report("7", "main", dates=[self.recent_day])
+        self.assertEqual(res["dates"], [self.recent_day])
+        self.assertEqual([r["agent"] for r in res["rounds"]], ["main"])
 
     def test_at_most_32_dates_and_reject_malformed(self):
         many = [server.day_key(self.t_today - i * DAY_MS) for i in range(40)]

@@ -1004,7 +1004,7 @@ def _agent_matches(agent: str, agent_filter: str) -> bool:
 def aggregate_agents(range_key: str, dates: Optional[List[str]] = None) -> Dict[str, Any]:
     """按 agent 维度汇总：用量、命中率、会话数、分模型明细。给出 dates 时忽略 range。"""
     dates = dates[:MAX_DATES] if dates else None
-    cache_key = f"agents:{range_key}" + (f"|{','.join(dates)}" if dates else "")
+    cache_key = f"agents:{json.dumps([range_key, dates])}"
     hit = cache_get(cache_key)
     if hit is not None:
         return hit
@@ -1109,7 +1109,7 @@ def first_round_report(
     给出 dates 时忽略 range：dates 只筛首轮发生的时间，不改变哪条是首轮。
     """
     dates = dates[:MAX_DATES] if dates else None
-    cache_key = f"fr:{range_key}:{agent_filter}" + (f"|{','.join(dates)}" if dates else "")
+    cache_key = f"fr:{json.dumps([range_key, agent_filter, dates])}"
     hit_cached = cache_get(cache_key)
     if hit_cached is not None:
         return hit_cached
@@ -1249,7 +1249,7 @@ def _root_session_id(sid: str, sessions: Dict[str, Any]) -> str:
 def sessions_by_root(range_key: str, dates: Optional[List[str]] = None) -> Dict[str, Any]:
     """会话用量按根会话归并：子会话（checkpoint writer）的消耗并入父会话。给出 dates 时忽略 range。"""
     dates = dates[:MAX_DATES] if dates else None
-    cache_key = f"root:{range_key}" + (f"|{','.join(dates)}" if dates else "")
+    cache_key = f"root:{json.dumps([range_key, dates])}"
     hit = cache_get(cache_key)
     if hit is not None:
         return hit

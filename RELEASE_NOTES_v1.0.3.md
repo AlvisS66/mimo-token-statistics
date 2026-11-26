@@ -10,9 +10,9 @@ v1.0.2 的复审后续：把三个新面板接上日历联动，修掉一批口�
   - 响应新增 `dates` 字段（未传时为 `null`）；该模式下 `range_label` 为选中日期，`since` 为最早选中日的本地零点
   - 格式错误回 `400`
   - 首轮口径不变：`dates` 只筛首轮发生的时间，不改变哪条是首轮；`pending` 同样按 `dates` 筛
-- `GET /api/overview` 的 `by_model` 每行新增 `pct`（相对第一名的百分比），与 `by_project` / `by_session` 对齐
+- `GET /api/overview` 的 `by_model` 每行新增 `pct`（相对第一名的百分比），与 `by_project` / `by_session` 对齐；`GET /api/days-hourly` 的 `by_model` 同样带 `pct`
 - `GET /api/export.csv` 在末尾新增 `agent` 列，既有列顺序不变
-- 仓库内新增回归测试 `tests/test_api_shape.py`（39 条，纯标准库 `unittest`，运行 `python -m unittest discover -s tests`）：锁定各接口的响应字段集合、首轮口径、`dates` 筛选与缓存隔离、静态文件路径边界
+- 仓库内新增回归测试 `tests/test_api_shape.py`（41 条，纯标准库 `unittest`，运行 `python -m unittest discover -s tests`）：锁定各接口的响应字段集合、首轮口径、`dates` 筛选与缓存隔离、静态文件路径边界
 
 ### 修复
 
@@ -28,7 +28,7 @@ v1.0.2 的复审后续：把三个新面板接上日历联动，修掉一批口�
 ### 兼容性
 
 - 接口字段**只增不改**：没有删除或改名任何响应字段
-- 不传 `dates` 时，三个维度接口的返回与 v1.0.2 一致，只多一个 `dates: null`；`range` 的行为不变
+- 不传 `dates` 时，三个维度接口的响应结构与 v1.0.2 一致，只多一个 `dates: null`；`range` 的行为不变。数据上唯一的差异来自上面的首轮分桶修复：显示 0% 的首轮现在归入 0% 桶，`bucket` 及各桶计数可能随之变化
 - **唯一的破坏性变更是去掉 CORS 头**：若此前有其它站点跨源直连这些接口，浏览器会拦截。面板本身同源，不受影响
 - 改动涉及 `server.py`，需要重启进程才能生效（聚合缓存是进程内全局，`/api/refresh` 不会重载模块）
 
