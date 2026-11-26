@@ -49,7 +49,7 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 
 ### S2.5 路径检查与 CORS
 
-- 静态文件路径解析抽为 `_resolve_static(rel) -> Optional[Path]`，用 `Path.is_relative_to(FRONTEND_ROOT)`（Python 3.9+）替代 `str.startswith`；越界返回 `None`，路由回 403。
+- 静态文件路径解析抽为 `_resolve_static(rel) -> Optional[Path]`，用 `Path.is_relative_to(FRONTEND_ROOT)`（Python 3.9+）替代 `str.startswith`；越界返回 `None`，路由回 403。评审后收紧为目录白名单，见 S2.8。
 - `_json()` 删除 `Access-Control-Allow-Origin: *`。删除 `do_OPTIONS()`：前端与 API 同源，不存在预检请求。
 
 ### S2.6 零散修复
