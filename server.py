@@ -2348,7 +2348,7 @@ def _resolve_static(rel: str) -> Optional[Path]:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "MiMoTokenStats/1.0.3"
+    server_version = "MiMoTokenStats/1.0.4"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
