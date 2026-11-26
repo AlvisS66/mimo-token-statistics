@@ -13,6 +13,7 @@ v1.0.2 的复审后续：把三个新面板接上日历联动，修掉一批口�
 - `GET /api/overview` 的 `by_model` 每行新增 `pct`（相对第一名的百分比），与 `by_project` / `by_session` 对齐；`GET /api/days-hourly` 的 `by_model` 同样带 `pct`
 - `GET /api/export.csv` 在末尾新增 `agent` 列，既有列顺序不变
 - 仓库内新增回归测试 `tests/test_api_shape.py`（44 条，纯标准库 `unittest`，运行 `python -m unittest discover -s tests`）：锁定各接口的响应字段集合、首轮口径、`dates` 筛选与缓存隔离、静态文件的目录白名单、`days-hourly` 的日期上限
+- **首轮明细分页**：表格下方的条数下拉改为「每页条数」（10 / 20 / 50），选「全部」仍一次显示所有行；下方新增翻页控件——`共 N 条 · 第 x / y 页`、上一页 / 下一页、页码按钮与「跳至 [ ] 页」。改搜索词、分桶、agent、选中日期、时间范围或页大小时回到第 1 页，刷新与 15 秒自动刷新保留当前页。此前选 10 / 20 / 50 只能看到前 N 名、后面的行没有入口，选「全部」则每次刷新都要重画上千行
 
 ### 修复
 
