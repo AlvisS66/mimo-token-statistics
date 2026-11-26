@@ -2457,13 +2457,6 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
 }
 .hover-card .hc-row strong { color: var(--text); font-weight: 600; }
 
-/* ── Table foot ──────────────────────────────────────────── */
-.table-foot {
-  display: flex;
-  justify-content: center;
-  padding-top: 12px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
