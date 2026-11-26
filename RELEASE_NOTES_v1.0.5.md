@@ -7,6 +7,7 @@
 - **请求卡片同行显示服务商与思考强度**：每张卡片现在是 `模型名 + [服务商] + [思考 max]` 一行，右侧是消耗与命中率，下面是入/出/缓存比例条与时间
   - `思考 默认` 表示这条请求没有记录思考强度（老数据）；两项都没有的历史数据只显示模型名
   - 服务商与思考强度都是小胶囊，深色 / 浅色主题下都清晰（实测对比度 5.59 / 3.93 与 6.57 / 4.33）
+- **主面板「模型用量」每行显示服务商**：模型名右边直接跟服务商小胶囊，同一个模型走过多家时按请求数降序全部列出（如 `deepseek-flash [kg-newapi] [deepseek]`）；`/api/overview` 与 `/api/days-hourly` 的 `by_model[]` 每行新增 `providers`
 - **「模型分布」每行显示服务商**：同一个模型经不同服务商时按请求数降序全部列出，例如 `deepseek-flash [kg-newapi] [deepseek]`
 - `/api/session` 的 `turns[]` 每条新增 `provider`（`data.providerID`）与 `variant`（`data.variant`，即思考强度）；`models[]` 每行新增 `providers`
 

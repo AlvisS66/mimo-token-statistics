@@ -236,6 +236,11 @@ def bump_mstat(st: Dict[str, int], it: Dict[str, Any], t: int) -> None:
     st["cache_write"] += it["cache_write"]
 
 
+def provider_list(counts: Dict[str, int]) -> List[str]:
+    """模型用过的服务商，按请求数降序（同数按名字），无服务商为空列表。"""
+    return [name for name, _ in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
+
+
 def pack_mstat(mid: str, st: Dict[str, int], denom_tokens: int = 0) -> Dict[str, Any]:
     cache = st.get("cache_read", 0) + st.get("cache_write", 0)
     outp = st.get("output", 0) + st.get("reasoning", 0)
@@ -619,6 +624,7 @@ def aggregate(range_key: str) -> Dict[str, Any]:
             "models": defaultdict(int),
         }
 
+    model_providers: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     model_agg: Dict[str, Dict[str, int]] = defaultdict(
         lambda: {
             "tokens": 0,
@@ -704,6 +710,8 @@ def aggregate(range_key: str) -> Dict[str, Any]:
         m["cache_write"] += it["cache_write"]
         if it["time"] > m.get("last", 0):
             m["last"] = it["time"]
+        if it.get("provider"):
+            model_providers[mid][it["provider"]] += 1
 
         sid = it["session_id"]
         if sid:
@@ -823,6 +831,7 @@ def aggregate(range_key: str) -> Dict[str, Any]:
                 "cache_hit": cache_hit_rate(m["cache_read"], m["cache_write"], m["input"]),
                 "sessions": len(top_sess),
                 "last": m.get("last", 0),
+                "providers": provider_list(model_providers[mid]),
                 "last_label": datetime.fromtimestamp(m.get("last", 0) / 1000).strftime("%m-%d %H:%M") if m.get("last") else "",
                 "top_sessions": top_sess[:8],
             }
@@ -1619,10 +1628,7 @@ def session_detail(session_id: str) -> Dict[str, Any]:
         "models": [
             {
                 **pack_mstat(mid, st, totals["tokens"]),
-                "providers": [
-                    name
-                    for name, _ in sorted(model_providers[mid].items(), key=lambda x: (-x[1], x[0]))
-                ],
+                "providers": provider_list(model_providers[mid]),
             }
             for mid, st in sorted(models.items(), key=lambda x: -x[1]["tokens"])
         ],
@@ -1770,6 +1776,7 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
     items = [it for it in load_full_items() if day_key(it["time"]) in day_set]
 
     model_agg: Dict[str, Dict[str, int]] = defaultdict(new_mstat)
+    model_providers: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     model_last: Dict[str, int] = {}
     sess_agg: Dict[str, Dict[str, Any]] = {}
     proj_agg: Dict[str, Dict[str, Any]] = {}
@@ -1780,6 +1787,8 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
         total += t
         mid = it["model"]
         bump_mstat(model_agg[mid], it, t)
+        if it.get("provider"):
+            model_providers[mid][it["provider"]] += 1
         model_last[mid] = max(model_last.get(mid, 0), it["time"])
 
         sid = it["session_id"]
@@ -1855,6 +1864,7 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
                 "cache_hit": cache_hit_rate(st["cache_read"], st["cache_write"], st["input"]),
                 "sessions": len(top_sess),
                 "last": model_last.get(mid, 0),
+                "providers": provider_list(model_providers[mid]),
                 "last_label": datetime.fromtimestamp(model_last.get(mid, 0) / 1000).strftime("%m-%d %H:%M")
                 if model_last.get(mid)
                 else "",

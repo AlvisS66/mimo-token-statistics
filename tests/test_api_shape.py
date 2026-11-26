@@ -333,6 +333,45 @@ class SessionDetailTurnTest(FixtureMixin, unittest.TestCase):
         self.assertEqual(models[0]["providers"], ["p-a", "p-b"])
 
 
+class ModelProvidersTest(FixtureMixin, unittest.TestCase):
+    """主面板「模型用量」每行要能显示服务商：两份 by_model 都得带 providers。"""
+
+    def test_overview_by_model_carries_providers(self):
+        rows = {r["model"]: r for r in server.aggregate("7")["by_model"]}
+        self.assertIn("m-test", rows)
+        self.assertEqual(rows["m-test"]["providers"], ["prov-a"])
+
+    def test_dates_ranks_by_model_carries_providers(self):
+        ranks = server.aggregate_dates_ranks([self.recent_day])
+        rows = {r["model"]: r for r in ranks["by_model"]}
+        self.assertIn("m-test", rows)
+        self.assertEqual(rows["m-test"]["providers"], ["prov-a"])
+
+    def test_providers_sorted_by_turns(self):
+        sid = "ses_prov2"
+        conn = sqlite3.connect(server.MIMO_DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (sid, "proj-1", None, "/proj/a", "Providers 2", self.t_recent, self.t_recent),
+            )
+            rows = [
+                ("q01", self.t_recent + 1000, _assistant(self.t_recent + 1000, 10, 1, 0, provider="p-c")),
+                ("q02", self.t_recent + 2000, _assistant(self.t_recent + 2000, 10, 1, 0, provider="p-b")),
+                ("q03", self.t_recent + 3000, _assistant(self.t_recent + 3000, 10, 1, 0, provider="p-b")),
+            ]
+            conn.executemany(
+                "INSERT INTO message VALUES (?, ?, ?, ?, ?, ?)",
+                [(mid, sid, "main", tc, tc, data) for mid, tc, data in rows],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._reset_server_cache()
+        rows = {r["model"]: r for r in server.aggregate("7")["by_model"]}
+        self.assertEqual(rows["m-test"]["providers"], ["p-b", "p-c", "prov-a"])
+
+
 class RangeWindowTest(FixtureMixin, unittest.TestCase):
     def test_all_is_zero(self):
         self.assertEqual(server.range_since_ms("all"), 0)

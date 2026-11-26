@@ -1153,7 +1153,7 @@
   }
 
   // ── rank rows ─────────────────────────────────────────────
-  function rankRow({ name, meta, pct, sub, fillClass = "", id = "", kind = "", open = false, detail = "", dataAttrs = "" }) {
+  function rankRow({ name, meta, pct, sub, fillClass = "", id = "", kind = "", open = false, detail = "", dataAttrs = "", chips = "" }) {
     // meta: "6.91亿 · 72.1%" → 消耗加粗、占比弱化
     let metaHtml = escapeHtml(meta || "");
     const m = (meta || "").match(/^(.*?)( · )([\d.]+%)(.*)$/);
@@ -1163,7 +1163,7 @@
     return `
       <div class="rank-row${open ? " open" : ""}" data-id="${escapeHtml(id)}" data-kind="${kind}" data-name="${escapeHtml(name)}" ${dataAttrs} tabindex="0" role="button">
         <div class="rank-top">
-          <div class="rank-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+          <div class="rank-name" title="${escapeHtml(name)}"><span class="rank-label">${escapeHtml(name)}</span>${chips}</div>
           <div class="rank-meta">${metaHtml}</div>
         </div>
         <div class="rank-bar"><div class="rank-fill ${fillClass}" style="width:${Math.max(1, Math.min(100, pct || 0))}%"></div></div>
@@ -1222,8 +1222,16 @@
       .slice(0, limit)
       .map((m, i) => {
         const open = state.openModel === m.model;
+        // 服务商小胶囊（模型用量这一榜才给）
+        const chips = (m.providers || [])
+          .map(
+            (p) =>
+              `<span class="t-chip t-chip-prov" title="服务商 ${escapeHtml(p)}">${escapeHtml(p)}</span>`
+          )
+          .join("");
         return rankRow({
           name: m.model,
+          chips,
           meta: `${m.fmt} · ${formatShare(m.share)} · 命中 ${m.cache_hit}%`,
           pct: m.pct,
           sub: `${m.turns} 次/${m.avg_fmt}`,

@@ -65,6 +65,14 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 前端在模型名右边按顺序渲染同款 `t-chip-prov` 小胶囊；名字太长时 chip 换行，模型名自己省略。
 - 只加服务商，不加思考强度（`variant` 是逐条请求的，按模型聚合会误导）。
 
+### S2.5 主面板「模型用量」每行也显示服务商（2026-11-26 用户追加）
+
+主面板的模型用量榜（`#model-list`）与抽屉里的模型分布是两份数据：前者来自 `GET /api/overview` 的 `by_model`（选中日期时来自 `/api/days-hourly`）。同样看不出模型走的是哪家服务商，所以：
+
+- `aggregate()` 与 `aggregate_dates_ranks()` 的 `by_model[]` 每行新增 `providers`（规则同 S2.4：该模型用过的服务商，按请求数降序，无服务商为空数组）——两个函数各构建一份 `by_model`，必须同改。
+- 前端 `rankRow()` 增加可选 `chips`，`renderModels()` 传服务商小胶囊；模型名过长时自己省略，chip 换行不撑破。
+- 项目榜 / agent 榜 / 归并行不传 `chips`，渲染结果与现在一致。
+
 ## [S3] Out of Scope
 
 - 模型分布那几行不加思考强度（`variant` 逐条不同，聚合成一个值会误导）；服务商见 S2.4。
@@ -79,6 +87,7 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - [x] T3: 滚动加载 — acceptance: 服务端不再截断 `turns`（删 `turns[-200:]`，用 210 条请求的用例锁住）；打开一个上千条消息的会话，首屏只渲染 50 条且提示 `已显示 50 / N 条`；滚到底自动追加到 100、150…，滚动位置不跳、已渲染卡片不重排；全部加载完提示变 `共 N 条`；关闭再打开计数归零 (covers: S2.3)
 - [x] T4: 版本串 1.0.5 + 发布说明 + README — acceptance: `Server` 头为 `MiMoTokenStats/1.0.5`，`RELEASE_NOTES_v1.0.5.md` 写明两项改动，README 的 `/api/session` 行提到 `provider` / `variant` (covers: S2.1)
 - [x] T5: 模型分布行显示服务商（用户追加）— acceptance: `session_detail()["models"][]` 带 `providers`（按条数降序、无服务商为空数组），前端模型名右边显示同款 chip；测试 fixture 里同一模型有 `prov-a` 与缺失两种请求时用例能区分 (covers: S2.4)
+- [x] T6: 主面板模型用量行显示服务商（用户追加）— acceptance: `aggregate("7")["by_model"]` 与 `aggregate_dates_ranks([d])["by_model"]` 每行都有 `providers`（按条数降序），前端「模型用量」每行在模型名右边显示 chip，项目 / agent / 归并三榜渲染不变 (covers: S2.5)
 
 ## Journey log
 
@@ -88,3 +97,4 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 2026-11-26 T2/T3/T5 实现与验收（同一份有头场景 `drawer.js` / `models.js` / `theme.js`，放在系统临时目录、不进仓库）：995 条的会话首屏 50 条（提示 `已显示 50 / 995 条`）→ 滚到底逐批追加 → `共 995 条`，全程 1.1 s、滚动位置不跳；卡片 `lineOffsets` 实测 `[0,0]`（chip 与模型名中线零偏差）；`模型分布` 每行带服务商，`ses_ffe5e5a6c…` 的 `deepseek-flash` 列出 `kg-newapi` + `deepseek` 两家；两项都缺的老数据（用 `page.route` 抹掉最后一条请求的两个字段构造）只显示模型名；深/浅主题对比度实测 服务商 5.59 / 3.93、思考强度 6.57 / 4.33；390 px 宽卡片与模型行均无横向溢出。
 - 2026-11-26 T4：`server_version` 升 `MiMoTokenStats/1.0.5`、补 `RELEASE_NOTES_v1.0.5.md`、README 的 `/api/session` 行写明「全部请求 + provider / variant / providers」；实测响应头与坏参数行为与 1.0.4 一致（只加字段）。
 - 2026-11-26 自查补一处时序守卫（`state.drawerReqId`，打开时自增、关闭时自增）：用 `page.route` 把 A 的响应拖 2.5 s、关掉 A 立刻开 B，实测旧代码 3.2 s 后 B 的标题被 A 覆盖（`这是什么仓库？` → `checkpoint writer缓存前缀修复后仍低缓存率分析`，提示从 `50 / 861` 变 `50 / 995`），加上守卫后 B 不动；同一次场景还验了「关掉再打开回到 50 条」。
+- 2026-11-26 T6（用户截图追加「模型用量这里也要加上服务商」）：`aggregate()` 与 `aggregate_dates_ranks()` 各补一份 `model_providers`，`by_model[]` 加 `providers`（抽了 `provider_list()` 与抽屉共用排序规则）；前端 `rankRow()` 加可选 `chips`，只有模型榜传。7 天 / 30 天 / 选中日期三种口径的有头实测都带服务商且 chip 与模型名中线偏差 0 px，项目榜 `#project-list .t-chip` 计数 0（未受影响），390 px 宽四行均无溢出。

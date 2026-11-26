@@ -1298,12 +1298,20 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   gap: 12px;
 }
 .rank-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 13px;
   font-weight: 600;
+  min-width: 0;
+  max-width: 70%;
+}
+.rank-name .rank-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 70%;
+  min-width: 0;
 }
 .rank-meta {
   font-size: 12px;
