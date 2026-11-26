@@ -122,6 +122,7 @@
     drawerTurns: [],
     drawerShown: 0,
     drawerTurnTotal: 0,
+    drawerReqId: 0,
   };
 
   function persistOpenRanks() {
@@ -2184,6 +2185,8 @@
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
 
+    // 迟到的响应不得覆盖后开的会话（关抽屉也会让在途请求作废）
+    const reqId = ++state.drawerReqId;
     const title = $("#drawer-title");
     const sub = $("#drawer-sub");
     const kpis = $("#drawer-kpis");
@@ -2197,6 +2200,7 @@
 
     try {
       const d = await fetchJSON(`/api/session?id=${encodeURIComponent(id)}`);
+      if (reqId !== state.drawerReqId) return;
       if (!d.ok) throw new Error(d.error || "加载失败");
       if (title) title.textContent = d.title || id;
       if (sub) sub.textContent = d.directory || id;
@@ -2262,6 +2266,7 @@
   }
 
   function closeDrawer() {
+    state.drawerReqId += 1; // 丢掉在途的会话响应
     const drawer = $("#drawer");
     const backdrop = $("#drawer-backdrop");
     drawer?.classList.remove("open");
