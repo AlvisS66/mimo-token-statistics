@@ -874,17 +874,17 @@ class SessionPaginationTest(PagingFixtureMixin, unittest.TestCase):
 
     def test_bad_paging_params_return_400(self):
         with self._serve() as get:
-            for path in (
-                "/api/overview?range=all&session_limit=abc",
-                "/api/overview?range=all&session_offset=-1",
-                "/api/overview?range=all&project_limit=x",
-                "/api/overview?range=all&project_offset=-5",
+            for path, param in (
+                ("/api/overview?range=all&session_limit=abc", "session_limit"),
+                ("/api/overview?range=all&session_offset=-1", "session_offset"),
+                ("/api/overview?range=all&project_limit=x", "project_limit"),
+                ("/api/overview?range=all&project_offset=-5", "project_offset"),
             ):
                 with self.subTest(path=path):
                     status, body = get(path)
                     self.assertEqual(status, 400, body)
-                    # 报错要指名是哪个参数坏了
-                    self.assertIn("limit" if "limit" in path else "offset", body.get("error", ""))
+                    # 报错要点名坏掉的那个参数：张冠李戴（如把 session_limit 报成 project_limit）会在这里挂
+                    self.assertEqual(body.get("error"), f"bad {param}")
 
 
 class ProjectPaginationTest(PagingFixtureMixin, unittest.TestCase):
@@ -961,10 +961,14 @@ class RootsPaginationTest(PagingFixtureMixin, unittest.TestCase):
 
     def test_bad_paging_params_return_400(self):
         with self._serve() as get:
-            for path in ("/api/sessions-root?range=all&limit=x", "/api/sessions-root?range=all&offset=-2"):
+            for path, param in (
+                ("/api/sessions-root?range=all&limit=x", "limit"),
+                ("/api/sessions-root?range=all&offset=-2", "offset"),
+            ):
                 with self.subTest(path=path):
                     status, body = get(path)
                     self.assertEqual(status, 400, body)
+                    self.assertEqual(body.get("error"), f"bad {param}")
 
 
 class DatesModePaginationTest(PagingFixtureMixin, unittest.TestCase):
