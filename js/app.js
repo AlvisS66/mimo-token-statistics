@@ -78,6 +78,7 @@
     heatmapWeeks: [],
     hourlyDay: null,
     hourlyReqId: 0,
+    dimsReqId: 0,
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
@@ -686,6 +687,7 @@
     if (statsEl) statsEl.innerHTML = `<div style="color:var(--text-3);font-size:12px">汇总中…</div>`;
     if (modelsEl) modelsEl.innerHTML = "";
     const reqId = ++state.hourlyReqId;
+    loadDimensions();
     try {
       const d = await fetchJSON(`/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}`);
       if (reqId !== state.hourlyReqId || JSON.stringify(state.selectedDayDates) !== JSON.stringify(dates)) return;
@@ -743,6 +745,7 @@
     $$(".hm-cell.selected").forEach((c) => c.classList.remove("selected"));
     restoreRangeRanks();
     syncHourlyForDays(null);
+    loadDimensions();
   }
 
   async function syncHourlyForDays(dates) {
@@ -1465,33 +1468,44 @@
   }
 
   // ── agent / 首轮 / 会话归并 ────────────────────────────────
+  function dimsQuery() {
+    const dates = state.selectedDayDates;
+    return dates.length ? `&dates=${encodeURIComponent(dates.join(","))}` : "";
+  }
+
+  // 副标题：选中日期时跟随日历，否则用接口回的区间标签
+  function dimsLabel(data) {
+    return state.selectedDayDates.length ? selectionLabel(state.selectedDayDates) : data?.range_label || "";
+  }
+
   async function loadDimensions() {
+    const reqId = ++state.dimsReqId;
     const range = encodeURIComponent(state.range);
-    await Promise.all([
-      fetchJSON(`/api/agents?range=${range}`)
-        .then((d) => {
-          if (d.ok) state.agents = d;
-        })
-        .catch(() => {}),
-      fetchJSON(`/api/sessions-root?range=${range}`)
-        .then((d) => {
-          if (d.ok) state.roots = d;
-        })
-        .catch(() => {}),
+    const dates = dimsQuery();
+    const [agents, roots] = await Promise.all([
+      fetchJSON(`/api/agents?range=${range}${dates}`).catch(() => null),
+      fetchJSON(`/api/sessions-root?range=${range}${dates}`).catch(() => null),
     ]);
+    // 快速切换日期时丢弃过期响应：过期数据连 state 都不能进，否则下次重渲染会翻出旧日期的数
+    if (reqId !== state.dimsReqId) return;
+    if (agents?.ok) state.agents = agents;
+    if (roots?.ok) state.roots = roots;
     // 先校正筛选值（本地记下的 agent 可能已经不存在），再按校正后的值取首轮
     populateFirstRoundAgentFilter();
     await loadFirstRound();
+    if (reqId !== state.dimsReqId) return;
     renderAgents();
     renderFirstRound();
     renderRoots();
   }
 
   async function loadFirstRound() {
+    const reqId = state.dimsReqId;
     const range = encodeURIComponent(state.range);
     const agent = state.frAgent ? `&agent=${encodeURIComponent(state.frAgent)}` : "";
     try {
-      const d = await fetchJSON(`/api/first-round?range=${range}${agent}`);
+      const d = await fetchJSON(`/api/first-round?range=${range}${agent}${dimsQuery()}`);
+      if (reqId !== state.dimsReqId) return;
       if (d.ok) state.firstRound = d;
     } catch (_) {}
   }
@@ -1510,7 +1524,7 @@
   function renderAgents() {
     const el = $("#agent-list");
     const sub = $("#agents-sub");
-    if (sub) sub.textContent = state.agents?.range_label || "";
+    if (sub) sub.textContent = dimsLabel(state.agents);
     if (!el) return;
     const list = state.agents?.by_agent || [];
     if (!list.length) {
@@ -1598,7 +1612,7 @@
     const t = d.totals || {};
 
     if (sub) {
-      sub.textContent = `${d.range_label || ""}${d.agent ? ` · ${d.agent}` : ""} · 首轮 ${exact(t.n)} 条`;
+      sub.textContent = `${dimsLabel(d)}${d.agent ? ` · ${d.agent}` : ""} · 首轮 ${exact(t.n)} 条`;
     }
     if (sum) {
       sum.innerHTML =
@@ -1695,7 +1709,7 @@
     if (!tbody) return;
     if (sub) {
       const tt = d?.totals || {};
-      sub.textContent = `${d?.range_label || ""} · ${tt.roots || 0} 个根会话，已并入 ${tt.child_sessions || 0} 个子会话（${formatTok(tt.child_tokens || 0)}）`;
+      sub.textContent = `${dimsLabel(d)} · ${tt.roots || 0} 个根会话，已并入 ${tt.child_sessions || 0} 个子会话（${formatTok(tt.child_tokens || 0)}）`;
     }
     const q = (state.rootsSearch || "").trim().toLowerCase();
     let rows = (d?.by_root || []).slice();
