@@ -133,13 +133,13 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 | POST | `/api/login` | 登录。JSON：`{"password":"..."}`；成功下发 Cookie |
 | POST | `/api/logout` | 注销当前会话 |
 | GET | `/api/auth` | 当前鉴权开关与是否已登录 |
-| GET | `/api/overview?range=` | 聚合统计。`range`: `today` \| `7` \| `14` \| `30` \| `90` \| `all`（别名 `/api/usage`）。会话榜支持 `session_limit` / `session_offset` / `session_sort` / `session_q` / `session_project` / `session_model`，项目榜支持 `project_limit` / `project_offset` / `project_sort` |
+| GET | `/api/overview?range=` | 聚合统计。`range`: `today` \| `7` \| `14` \| `30` \| `90` \| `all`（别名 `/api/usage`）。会话榜支持 `session_limit` / `session_offset` / `session_sort` / `session_q` / `session_project` / `session_model`，项目榜支持 `project_limit` / `project_offset` / `project_sort`；响应带 `sessions_total` / `projects_total` / `project_names` |
 | GET | `/api/day-hourly?date=` | 某日 24 小时分模型（日历联动） |
-| GET | `/api/days-hourly?dates=` | 多日合并小时分布，`dates` 为逗号分隔日期（Shift 多选）；分页参数与 `/api/overview` 相同 |
+| GET | `/api/days-hourly?dates=` | 多日合并小时分布，`dates` 为逗号分隔日期（Shift 多选）；分页参数与总数字段和 `/api/overview` 相同 |
 | GET | `/api/session?id=` | 单会话明细（最近请求列表） |
 | GET | `/api/agents?range=&dates=` | **按 agent 汇总**：用量、命中率、会话数、分模型明细 |
 | GET | `/api/first-round?range=&agent=&dates=` | **首轮命中**：分桶（0% / 1–50% / 50–90% / 90–100%）+ 每会话明细 + `pending` 未落盘计数。`agent` 支持前缀（`checkpoint-writer` 可命中 `checkpoint-writer-1`） |
-| GET | `/api/sessions-root?range=&dates=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细。支持 `limit` / `offset` / `q` / `sort` |
+| GET | `/api/sessions-root?range=&dates=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细。支持 `limit` / `offset` / `q` / `sort`；响应带 `total`（过滤后、分页前的根会话数） |
 | GET | `/api/export.csv?range=` | 按当前范围导出 CSV |
 | GET | `/api/health` | 健康检查（别名 `/api/status`） |
 | GET | `/api/quota` | 可选：读本机 cookie 查询官方周配额 |
@@ -151,7 +151,7 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 
 会话榜、项目榜、根会话榜都是**服务端分页**：聚合结果缓存全量行，分页在响应组装时切分，所以翻页不会重扫数据库。
 
-- 缺省行为与旧版一致：`session_limit` 默认 50、`project_limit` 默认 30、`limit` 默认 100，`0` 表示不分页
+- 缺省条数与旧版一致：`session_limit` 默认 50、`project_limit` 默认 30、`limit` 默认 100，`0` 表示不分页。注意缺省**排序**变了：不带 `*_sort` 时会话榜按 `last` 降序（旧版是 `tokens` 降序），项目榜与根会话榜仍是 `tokens` 降序
 - 过滤与排序在服务端做：`session_q`（标题 / 项目 / 目录 / 会话 id / 模型名，小写子串匹配）、`session_project`、`session_model`、根会话的 `q`（标题 / 项目 / 子会话标题）
 - `*_sort` / `sort` 支持 `tokens` / `turns` / `avg` / `input` / `output` / `cache` / `hit` / `last`，默认会话榜按 `last`、项目榜与根会话榜按 `tokens`；并列时先比 `tokens` 再比 `id`
 - 响应里的 `sessions_total` / `projects_total` / `total` 是**过滤后、分页前**的总数，界面用它算页数；`project_names` 是全量项目名（不受 `project_limit` 影响）
