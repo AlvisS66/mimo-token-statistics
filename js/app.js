@@ -1700,7 +1700,7 @@
     const size = state.frLimit > 0 ? state.frLimit : rows.length;
     const pages = size > 0 ? Math.max(1, Math.ceil(rows.length / size)) : 1;
     if (state.frPage > pages) state.frPage = pages;
-    renderFirstRoundPager(rows.length, pages);
+    renderPager("firstround", rows.length, state.frPage, pages);
 
     if (!rows.length) {
       tbody.innerHTML = "";
@@ -1739,31 +1739,45 @@
     });
   }
 
-  function renderFirstRoundPager(total, pages) {
-    const pager = $("#firstround-pager");
-    if (!pager) return;
+  // ── 通用翻页控件（首轮明细 / 会话用量 / 项目榜 / 会话归并共用） ──
+  // DOM 约定：<name>-pager / -page-info / -page-nav / -prev / -page-nums / -next /
+  // -limit / -jump（跳页那一组）/ -page-jump（输入框）
+  function pagerEls(name) {
+    const pick = (suffix) => $(`#${name}-${suffix}`);
+    return {
+      box: pick("pager"),
+      info: pick("page-info"),
+      nav: pick("page-nav"),
+      nums: pick("page-nums"),
+      prev: pick("prev"),
+      next: pick("next"),
+      jump: pick("jump"),
+      input: pick("page-jump"),
+      limit: pick("limit"),
+    };
+  }
+
+  function renderPager(name, total, page, pages) {
+    const el = pagerEls(name);
+    if (!el.box) return;
     // 每页条数选择器在这一行里：有行就必须显示，否则「全部」模式下没地方切回分页
-    pager.hidden = total === 0;
-    $("#firstround-page-info").textContent = `共 ${exact(total)} 条 · 第 ${state.frPage} / ${pages} 页`;
+    el.box.hidden = total === 0;
+    if (el.info) el.info.textContent = `共 ${exact(total)} 条 · 第 ${page} / ${pages} 页`;
     const single = pages <= 1;
-    const nav = $("#firstround-page-nav");
-    if (nav) nav.hidden = single;
-    const jump = $("#firstround-jump");
-    if (jump) jump.hidden = single;
-    if (!single) {
-      $("#firstround-prev").disabled = state.frPage <= 1;
-      $("#firstround-next").disabled = state.frPage >= pages;
-      renderPageNums(pages);
-    }
+    if (el.nav) el.nav.hidden = single;
+    if (el.jump) el.jump.hidden = single;
+    if (single) return;
+    if (el.prev) el.prev.disabled = page <= 1;
+    if (el.next) el.next.disabled = page >= pages;
+    renderPageNums(name, page, pages);
   }
 
   // 页码按钮：页数多时按 antd 的窗口规则（当前页附近 5 个 + 首末页，缺口用省略号）
-  function renderPageNums(pages) {
-    const box = $("#firstround-page-nums");
+  function renderPageNums(name, cur, pages) {
+    const box = pagerEls(name).nums;
     if (!box) return;
     // 重建会销毁刚被点的按钮，键盘焦点会掉回 body：重建后把焦点放回当前页
     const hadFocus = box.contains(document.activeElement);
-    const cur = state.frPage;
     const nums = [];
     if (pages <= 7) {
       for (let i = 1; i <= pages; i++) nums.push(i);
@@ -1788,6 +1802,27 @@
       })
       .join("");
     if (hadFocus) box.querySelector(".page-num.active")?.focus();
+  }
+
+  // 翻页动作交给各表：本地分页的只重画，服务端分页的带着新 offset 重新请求
+  function bindPager(name, { getPage, go, setSize }) {
+    const el = pagerEls(name);
+    el.prev?.addEventListener("click", () => go(Math.max(1, getPage() - 1)));
+    el.next?.addEventListener("click", () => go(getPage() + 1));
+    el.nums?.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-page]");
+      if (btn) go(Number(btn.dataset.page));
+    });
+    el.input?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const n = Number.parseInt(e.target.value, 10);
+      e.target.value = "";
+      if (!Number.isFinite(n)) return;
+      // 上限交给渲染时的 clamp（越界收到最后一页）
+      go(Math.max(1, n));
+    });
+    el.limit?.addEventListener("change", (e) => setSize(Number(e.target.value) || 0));
   }
 
   function renderRoots() {
@@ -2384,37 +2419,17 @@
       renderFirstRoundTable();
     });
 
-    $("#firstround-limit")?.addEventListener("change", (e) => {
-      state.frLimit = Number(e.target.value) || 0;
-      localStorage.setItem("mimo-ts-fr-limit", String(state.frLimit));
-      renderFirstRoundTable();
-    });
-
-    $("#firstround-prev")?.addEventListener("click", () => {
-      state.frPage -= 1;
-      renderFirstRoundTable();
-    });
-    $("#firstround-next")?.addEventListener("click", () => {
-      state.frPage += 1;
-      renderFirstRoundTable();
-    });
-
-    $("#firstround-page-nums")?.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-page]");
-      if (!btn) return;
-      state.frPage = Number(btn.dataset.page);
-      renderFirstRoundTable();
-    });
-
-    $("#firstround-page-jump")?.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      const n = Number.parseInt(e.target.value, 10);
-      e.target.value = "";
-      if (!Number.isFinite(n)) return;
-      // 上限交给渲染时的 clamp（越界收到最后一页）
-      state.frPage = Math.max(1, n);
-      renderFirstRoundTable();
+    bindPager("firstround", {
+      getPage: () => state.frPage,
+      go: (page) => {
+        state.frPage = page;
+        renderFirstRoundTable();
+      },
+      setSize: (value) => {
+        state.frLimit = value;
+        localStorage.setItem("mimo-ts-fr-limit", String(state.frLimit));
+        renderFirstRoundTable();
+      },
     });
 
     $("#firstround-search")?.addEventListener(

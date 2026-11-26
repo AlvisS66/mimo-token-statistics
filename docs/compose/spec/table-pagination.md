@@ -96,8 +96,8 @@ source: feat/table-pagination
 ## Tasks
 
 - [x] T1: 分页契约的失败测试 — acceptance: `tests/test_api_shape.py` 新增用例覆盖 `session_limit/offset/sort`、`session_q/project/model` 过滤、`project_*`、`/api/sessions-root` 的 `limit/offset/q`、`*_total` 字段、越界 `offset` 返回空数组、坏参数 400；在当前实现上运行这些新用例必须**失败**（旧实现没有这些参数，`total` 字段缺失） (covers: S2.1)
-- [ ] T2: 服务端实现 — acceptance: T1 的用例全部通过；`aggregate()` / `aggregate_dates_ranks()` / `sessions_by_root()` 返回全量行；缓存键仍只含 `range` / `dates`（同 range 连续两次不同 `limit` 只有一次全量计算）；原有 44 条测试仍全绿 (covers: S2.1) (depends: T1)
-- [ ] T3: 前端通用翻页控件 — acceptance: 首轮明细的翻页行外观 / 顺序 / 文案与改动前一致（`共 N 条 · 第 x / y 页`、上一页 / 页码 / 下一页、`N 条/页`、跳至），有头场景复跑上一轮的 T1 / T2 / T4 / T5 断言全绿 (covers: S2.2)
+- [x] T2: 服务端实现 — acceptance: T1 的用例全部通过；`aggregate()` / `aggregate_dates_ranks()` / `sessions_by_root()` 返回全量行；缓存键仍只含 `range` / `dates`（同 range 连续两次不同 `limit` 只有一次全量计算）；原有 44 条测试仍全绿 (covers: S2.1) (depends: T1)
+- [x] T3: 前端通用翻页控件 — acceptance: 首轮明细的翻页行外观 / 顺序 / 文案与改动前一致（`共 N 条 · 第 x / y 页`、上一页 / 页码 / 下一页、`N 条/页`、跳至），有头场景复跑上一轮的 T1 / T2 / T4 / T5 断言全绿 (covers: S2.2)
 - [ ] T4: 会话用量表接入服务端分页 — acceptance: 全部历史下选 10 条/页只显示 10 行、翻到第 2 页与第 1 页无重复行（`session_id` 唯一）、页数 = `ceil(sessions_total / 10)`；搜索词 / 项目筛选 / 模型筛选 / 排序 / 页大小变化回第 1 页并改变结果；「显示更多」按钮消失；选中日期模式同样可分页 (covers: S2.3)
 - [ ] T5: 项目榜接入 — acceptance: 全部历史有 19 个项目、选 10 条/页显示 10 个并出现第 2 页；改排序刷新为对应顺序；展开某个项目后翻页再翻回，展开状态仍在 (covers: S2.4)
 - [ ] T6: 会话归并接入 — acceptance: 全部历史 `total` 为 355 附近、选 10 条/页只显示 10 行；搜索只回匹配行且页数随之变化；翻页后 `#roots-sub` 的根会话数不变 (covers: S2.5)
