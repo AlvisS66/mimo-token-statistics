@@ -404,6 +404,146 @@ def collect_rows(range_key: str, min_days: int = 0) -> List[Dict[str, Any]]:
     return [it for it in all_items if it["time"] >= since_ms]
 
 
+DEFAULT_SESSION_LIMIT = 50
+DEFAULT_PROJECT_LIMIT = 30
+DEFAULT_ROOT_LIMIT = 100
+
+# 排序键 → 行字段，与前端 sortRankItems() 的键集合一致
+SORT_FIELDS = {
+    "tokens": "tokens",
+    "turns": "turns",
+    "avg": "avg",
+    "input": "input",
+    "output": "output",
+    "cache": "cache",
+    "hit": "cache_hit",
+    "last": "last",
+}
+
+
+def _paging_param(qs: Dict[str, str], name: str, default: int) -> int:
+    raw = (qs.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"bad {name}")
+    if value < 0:
+        raise ValueError(f"bad {name}")
+    return value
+
+
+def _sort_num(value: Any) -> float:
+    try:
+        return float(value) or 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def sort_rows(rows: List[Dict[str, Any]], sort: str, default_sort: str) -> List[Dict[str, Any]]:
+    """按 8 个排序键之一降序排；并列时先比 tokens 再比 id。
+
+    二级 / 三级键是分页的前提：没有它，同分的两行可能跨页各出现一次，或者两页都不出现。
+    """
+    field = SORT_FIELDS.get((sort or "").strip()) or SORT_FIELDS[default_sort]
+    return sorted(
+        rows,
+        key=lambda r: (
+            -_sort_num(r.get(field)),
+            -_sort_num(r.get("tokens")),
+            str(r.get("id") or r.get("name") or ""),
+        ),
+    )
+
+
+def slice_page(rows: List[Dict[str, Any]], limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
+    """返回 (当前页, 过滤后总数)；limit 为 0 表示不分页。"""
+    total = len(rows)
+    if limit <= 0:
+        return rows[offset:], total
+    return rows[offset : offset + limit], total
+
+
+def filter_session_rows(rows: List[Dict[str, Any]], qs: Dict[str, str], prefix: str) -> List[Dict[str, Any]]:
+    """搜索 / 项目筛选 / 模型筛选，规则与前端 filteredSessions() 一致。"""
+    project = (qs.get(f"{prefix}project") or "").strip()
+    model = (qs.get(f"{prefix}model") or "").strip()
+    q = (qs.get(f"{prefix}q") or "").strip().lower()
+    out = rows
+    if project:
+        out = [r for r in out if (r.get("project_name") or "") == project]
+    if model:
+        out = [r for r in out if any((m.get("model") or "") == model for m in r.get("models") or [])]
+    if q:
+        out = [
+            r
+            for r in out
+            if q
+            in " ".join(
+                [
+                    str(r.get("title") or ""),
+                    str(r.get("project_name") or ""),
+                    str(r.get("directory") or ""),
+                    str(r.get("id") or ""),
+                ]
+                + [str(m.get("model") or "") for m in r.get("models") or []]
+            ).lower()
+        ]
+    return out
+
+
+def filter_root_rows(rows: List[Dict[str, Any]], qs: Dict[str, str]) -> List[Dict[str, Any]]:
+    """根会话搜索：标题 / 项目 / 子会话标题（与前端 renderRoots() 的过滤一致）。"""
+    q = (qs.get("q") or "").strip().lower()
+    if not q:
+        return rows
+
+    def hit(row: Dict[str, Any]) -> bool:
+        if q in str(row.get("title") or "").lower():
+            return True
+        if q in str(row.get("project_name") or "").lower():
+            return True
+        return any(q in str(c.get("title") or "").lower() for c in row.get("children") or [])
+
+    return [r for r in rows if hit(r)]
+
+
+def page_session_block(resp: Dict[str, Any], qs: Dict[str, str]) -> Dict[str, Any]:
+    """会话用量 + 项目榜的过滤 / 排序 / 分页，返回新响应（浅拷贝，行对象只读共享）。
+
+    分页必须在缓存之后：aggregate() 的缓存键只含 range / dates，缓存里是全量行，
+    所以翻页只切列表，不会每翻一页重扫一次全库。
+    """
+    sessions = filter_session_rows(resp.get("by_session") or [], qs, "session_")
+    sessions = sort_rows(sessions, qs.get("session_sort", ""), "last")
+    s_limit = _paging_param(qs, "session_limit", DEFAULT_SESSION_LIMIT)
+    s_offset = _paging_param(qs, "session_offset", 0)
+    sessions, sessions_total = slice_page(sessions, s_limit, s_offset)
+
+    projects = sort_rows(resp.get("by_project") or [], qs.get("project_sort", ""), "tokens")
+    p_limit = _paging_param(qs, "project_limit", DEFAULT_PROJECT_LIMIT)
+    p_offset = _paging_param(qs, "project_offset", 0)
+    projects, projects_total = slice_page(projects, p_limit, p_offset)
+
+    return {
+        **resp,
+        "by_session": sessions,
+        "by_project": projects,
+        "sessions_total": sessions_total,
+        "projects_total": projects_total,
+    }
+
+
+def page_root_block(resp: Dict[str, Any], qs: Dict[str, str]) -> Dict[str, Any]:
+    rows = filter_root_rows(resp.get("by_root") or [], qs)
+    rows = sort_rows(rows, qs.get("sort", ""), "tokens")
+    limit = _paging_param(qs, "limit", DEFAULT_ROOT_LIMIT)
+    offset = _paging_param(qs, "offset", 0)
+    rows, total = slice_page(rows, limit, offset)
+    return {**resp, "by_root": rows, "total": total}
+
+
 def aggregate(range_key: str) -> Dict[str, Any]:
     """主统计：KPI + 每日序列 + 模型/项目/会话/小时。"""
     cache_key = f"agg:{range_key}"
@@ -687,7 +827,7 @@ def aggregate(range_key: str) -> Dict[str, Any]:
         m["pct"] = round(m["tokens"] / max_model * 100) if max_model else 0
 
     by_session = []
-    for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"])[:50]:
+    for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"]):
         models = [
             {"model": mid, "tokens": mt, "share": round(mt / s["tokens"] * 100, 1) if s["tokens"] else 0}
             for mid, mt in sorted(s["models"].items(), key=lambda x: -x[1])
@@ -718,7 +858,7 @@ def aggregate(range_key: str) -> Dict[str, Any]:
         s["pct"] = round(s["tokens"] / max_sess * 100) if max_sess else 0
 
     by_project = []
-    for pkey, p in sorted(proj_agg.items(), key=lambda x: -x[1]["tokens"])[:30]:
+    for pkey, p in sorted(proj_agg.items(), key=lambda x: -x[1]["tokens"]):
         models = [
             pack_mstat(mid, st, p["tokens"])
             for mid, st in sorted(p["model_stats"].items(), key=lambda x: -x[1]["tokens"])
@@ -1382,7 +1522,7 @@ def sessions_by_root(range_key: str, dates: Optional[List[str]] = None) -> Dict[
             "fmt": format_token_lx(total),
             "child_tokens": sum(s["child_tokens"] for s in by_root),
         },
-        "by_root": by_root[:100],
+        "by_root": by_root,
     }
     cache_set(cache_key, result)
     return result
@@ -1710,7 +1850,7 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
         m["pct"] = round(m["tokens"] / max_model * 100) if max_model else 0
 
     by_session = []
-    for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"])[:50]:
+    for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"]):
         turns = s["turns"] or 0
         models = [
             {"model": mid, "tokens": mt, "share": round(mt / s["tokens"] * 100, 1) if s["tokens"] else 0}
@@ -1742,7 +1882,7 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
         s["pct"] = round(s["tokens"] / max_sess * 100) if max_sess else 0
 
     by_project = []
-    for pkey, p in sorted(proj_agg.items(), key=lambda x: -x[1]["tokens"])[:30]:
+    for pkey, p in sorted(proj_agg.items(), key=lambda x: -x[1]["tokens"]):
         turns = p["turns"] or 0
         models = [pack_mstat(mid, st, p["tokens"]) for mid, st in sorted(p["model_stats"].items(), key=lambda x: -x[1]["tokens"])]
         top_sess = []
@@ -2405,7 +2545,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/overview" or path == "/api/usage":
                 rk = qs.get("range", "7")
                 try:
-                    self._json(aggregate(rk))
+                    self._json(page_session_block(aggregate(rk), qs))
+                except ValueError as e:
+                    self._json({"ok": False, "error": str(e)}, 400)
                 except FileNotFoundError as e:
                     self._json({"ok": False, "error": str(e)}, 503)
                 except Exception as e:
@@ -2445,7 +2587,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/sessions-root":
                 rk = qs.get("range", "7")
                 try:
-                    self._json(sessions_by_root(rk, sel_dates))
+                    self._json(page_root_block(sessions_by_root(rk, sel_dates), qs))
+                except ValueError as e:
+                    self._json({"ok": False, "error": str(e)}, 400)
                 except FileNotFoundError as e:
                     self._json({"ok": False, "error": str(e)}, 503)
                 except Exception as e:
@@ -2481,7 +2625,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "missing dates"}, 400)
                     return
                 try:
-                    self._json(get_days_hourly(date_list))
+                    self._json(page_session_block(get_days_hourly(date_list), qs))
+                except ValueError as e:
+                    self._json({"ok": False, "error": str(e)}, 400)
                 except Exception as e:
                     self._json({"ok": False, "error": str(e)}, 500)
                 return

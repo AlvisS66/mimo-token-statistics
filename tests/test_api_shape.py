@@ -843,7 +843,7 @@ class SessionPaginationTest(PagingFixtureMixin, unittest.TestCase):
             self.assertEqual({r["project_name"] for r in proj["by_session"]}, {"a"})
             self.assertEqual(proj["sessions_total"], len(proj["by_session"]))
 
-            _, model = get("/api/overview?range=all&session_model=m-gamma&session_limit=0")
+            _, model = get("/api/overview?range=all&session_model=m-gamma&session_sort=tokens&session_limit=0")
             self.assertEqual([r["id"] for r in model["by_session"]], ["ses04", "ses08", "ses12"])
 
             # 搜索与筛选叠加：a 项目里标题含 special 的只有 07
