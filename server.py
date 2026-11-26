@@ -2158,6 +2158,15 @@ LOGIN_PAGE = """<!DOCTYPE html>
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
+def _resolve_static(rel: str) -> Optional[Path]:
+    """把 URL 路径解析为前端目录内的绝对路径；越界返回 None。
+
+    按路径段判断包含关系：str.startswith 会把同名前缀的兄弟目录（foo-x/）当成 foo/ 的子路径。
+    """
+    target = (FRONTEND_ROOT / rel).resolve()
+    return target if target.is_relative_to(FRONTEND_ROOT.resolve()) else None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "MiMoTokenStats/1.0.2"
@@ -2297,7 +2306,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -2324,14 +2332,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def do_OPTIONS(self) -> None:  # noqa: N802
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
     def do_GET(self) -> None:  # noqa: N802
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
@@ -2347,10 +2347,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path.startswith("/assets/") or path.startswith("/css/") or path.startswith("/js/"):
-                rel = path.lstrip("/")
-                # prevent path traversal
-                target = (FRONTEND_ROOT / rel).resolve()
-                if not str(target).startswith(str(FRONTEND_ROOT.resolve())):
+                target = _resolve_static(path.lstrip("/"))
+                if target is None:
                     self._json({"ok": False, "error": "forbidden"}, 403)
                     return
                 self._file(target)

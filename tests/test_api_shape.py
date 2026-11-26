@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import csv
+import http.client
 import io
 import json
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import datetime
@@ -303,6 +305,62 @@ class SessionRootTest(FixtureMixin, unittest.TestCase):
         self.assertIn(server._root_session_id("a", sessions), {"a", "b"})
         self.assertIn(server._root_session_id("b", sessions), {"a", "b"})
         self.assertEqual(server._root_session_id("c", sessions), "c")  # 悬空 parent：自身为根
+
+
+class StaticPathTest(unittest.TestCase):
+    """静态文件路径解析：按路径段判断包含关系。"""
+
+    def test_inside_root(self):
+        target = server._resolve_static("css/style.css")
+        self.assertIsNotNone(target)
+        self.assertTrue(target.is_file())
+
+    def test_sibling_with_same_prefix_is_rejected(self):
+        # str.startswith 会放行的场景：同名前缀的兄弟目录
+        self.assertIsNone(server._resolve_static(f"../{server.FRONTEND_ROOT.name}-x/server.py"))
+
+    def test_traversal_is_rejected(self):
+        self.assertIsNone(server._resolve_static("../../etc/passwd"))
+        self.assertIsNone(server._resolve_static("js/../../server.py"))
+
+
+class HttpHeaderTest(FixtureMixin, unittest.TestCase):
+    """HTTP 层：不下发 CORS 头，且不响应 OPTIONS（前端与 API 同源，无预检）。"""
+
+    def test_no_cors_header_and_no_options(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        quiet = server.Handler.log_message
+        server.Handler.log_message = lambda *a, **k: None
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/api/auth")
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 200)
+            self.assertIsNone(resp.getheader("Access-Control-Allow-Origin"))
+            conn.close()
+
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("OPTIONS", "/api/overview")
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 501)
+            self.assertIsNone(resp.getheader("Access-Control-Allow-Origin"))
+            conn.close()
+
+            # 静态路由：同名前缀的兄弟目录必须 403（旧实现 startswith 放行后落到 404）
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", f"/css/../../{server.FRONTEND_ROOT.name}-x/server.py")
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 403)
+            conn.close()
+        finally:
+            server.Handler.log_message = quiet
+            httpd.shutdown()
+            httpd.server_close()
 
 
 if __name__ == "__main__":
