@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import http.client
 import io
@@ -634,6 +635,332 @@ class QuotaTempFileTest(unittest.TestCase):
             fake = Path(d) / "Cookies"
             fake.write_bytes(b"")
             self.assertEqual(self._run(fake, fail_connect=True)["reason"], "cookie-read-failed")
+
+
+PAGE_SESSIONS = 12
+
+SORT_FIELDS = {
+    "tokens": "tokens",
+    "turns": "turns",
+    "avg": "avg",
+    "input": "input",
+    "output": "output",
+    "cache": "cache",
+    "hit": "cache_hit",
+    "last": "last",
+}
+
+
+class PagingFixtureMixin:
+    """分页专用 fixture：12 个根会话 + 2 个子会话 + 2 个项目。
+
+    tokens / 时间 / 轮次刻意错开，用来断言排序；9 / 10 号 tokens 故意相同，用来锁定并列时的二级键。
+    子会话的消耗压到最小，免得它们在按 tokens 排序时插进根会话中间。
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.tmp = tempfile.TemporaryDirectory()
+        db_path = Path(self.tmp.name) / "mimocode.db"
+        self.now_ms = int(time.time() * 1000)
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute("CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, name TEXT)")
+        c.execute(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, "
+            "directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER)"
+        )
+        c.execute(
+            "CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, agent_id TEXT, "
+            "time_created INTEGER, time_updated INTEGER, data TEXT)"
+        )
+        c.execute("INSERT INTO project VALUES ('proj-a', '/proj/a', 'a')")
+        c.execute("INSERT INTO project VALUES ('proj-b', '/proj/b', 'b')")
+
+        sessions, messages = [], []
+        for i in range(1, PAGE_SESSIONS + 1):
+            sid = f"ses{i:02d}"
+            odd = i % 2 == 1
+            created = self.now_ms - (PAGE_SESSIONS + 1 - i) * 60_000  # 编号越大越新
+            title = "Special seven" if i == 7 else f"Sess {i:02d}"
+            sessions.append(
+                (
+                    sid,
+                    "proj-a" if odd else "proj-b",
+                    None,
+                    "/proj/a" if odd else "/proj/b",
+                    title,
+                    created,
+                    created,
+                )
+            )
+            tokens = 4400 if i in (9, 10) else 1100 * (PAGE_SESSIONS + 1 - i)
+            cache_read = 100 * i
+            messages.append(
+                (
+                    f"m{i:02d}",
+                    sid,
+                    "main",
+                    created,
+                    created,
+                    _assistant(created, tokens - cache_read - 50, 50, cache_read),
+                )
+            )
+            if i % 4 == 0:  # 04 / 08 / 12 多一轮，用来测按轮次排序
+                messages.append(
+                    (
+                        f"m{i:02d}b",
+                        sid,
+                        "main",
+                        created + 1000,
+                        created + 1000,
+                        _assistant(created + 1000, 10, 1, 50, model="m-gamma"),
+                    )
+                )
+
+        child_created = self.now_ms - (PAGE_SESSIONS + 2) * 60_000
+        sessions.append(("ses-child-a", "proj-a", "ses01", "/proj/a", "Child alpha", child_created, child_created))
+        sessions.append(("ses-child-b", "proj-b", "ses02", "/proj/b", "Child beta", child_created, child_created))
+        messages.append(("mc1", "ses-child-a", "checkpoint-writer-1", child_created, child_created,
+                         _assistant(child_created, 10, 1, 5)))
+        messages.append(("mc2", "ses-child-b", "checkpoint-writer-1", child_created, child_created,
+                         _assistant(child_created, 10, 1, 5)))
+
+        c.executemany("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)", sessions)
+        c.executemany("INSERT INTO message VALUES (?, ?, ?, ?, ?, ?)", messages)
+        conn.commit()
+        conn.close()
+
+        self._saved_db = server.MIMO_DB_PATH
+        server.MIMO_DB_PATH = db_path
+        self._reset_server_cache()
+
+    def tearDown(self):
+        server.MIMO_DB_PATH = self._saved_db
+        self._reset_server_cache()
+        self.tmp.cleanup()
+        super().tearDown()
+
+    @staticmethod
+    def _reset_server_cache():
+        server.cache_clear()
+        server._FULL_ITEMS = None
+        server._FULL_META = None
+        server._FULL_FIRST = None
+        server._FULL_PENDING = None
+        server._FULL_ITEMS_AT = 0.0
+
+    @property
+    def today_day(self) -> str:
+        return server.day_key(self.now_ms)
+
+    @contextlib.contextmanager
+    def _serve(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        port = httpd.server_address[1]
+        quiet, auth = server.Handler.log_message, server.AUTH_ENABLED
+        server.Handler.log_message = lambda *a, **k: None
+        server.AUTH_ENABLED = False
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+
+        def get(path):
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            return resp.status, json.loads(resp.read())
+
+        try:
+            yield get
+        finally:
+            conn.close()
+            server.AUTH_ENABLED = auth
+            server.Handler.log_message = quiet
+            httpd.shutdown()
+            httpd.server_close()
+
+
+class SessionPaginationTest(PagingFixtureMixin, unittest.TestCase):
+    """会话用量表：服务端 limit / offset / 过滤 / 排序 + sessions_total。"""
+
+    def test_pages_do_not_overlap_or_drop_rows(self):
+        with self._serve() as get:
+            seen = []
+            for offset in (0, 5, 10):
+                status, body = get(f"/api/overview?range=all&session_limit=5&session_offset={offset}")
+                self.assertEqual(status, 200)
+                self.assertEqual(body["sessions_total"], 14)
+                seen.extend(r["id"] for r in body["by_session"])
+            # offset=10 只剩 4 条（14 条总数），前两页各 5 条
+            self.assertEqual(len(seen), 14)
+            self.assertEqual(len(set(seen)), 14)
+
+    def test_limit_zero_returns_everything(self):
+        with self._serve() as get:
+            status, body = get("/api/overview?range=all&session_limit=0")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(body["by_session"]), 14)
+            self.assertEqual(body["sessions_total"], 14)
+
+    def test_sort_tokens_with_stable_tie_break(self):
+        with self._serve() as get:
+            _, head = get("/api/overview?range=all&session_sort=tokens&session_limit=5&session_offset=0")
+            _, tail = get("/api/overview?range=all&session_sort=tokens&session_limit=5&session_offset=5")
+        self.assertEqual([r["id"] for r in head["by_session"]], ["ses01", "ses02", "ses03", "ses04", "ses05"])
+        # 09 / 10 号 tokens 相同：并列时按 id 升序，翻页不会重复或漏行
+        self.assertEqual([r["id"] for r in tail["by_session"]], ["ses06", "ses07", "ses08", "ses09", "ses10"])
+
+    def test_sort_turns_continues_across_pages(self):
+        with self._serve() as get:
+            _, first = get("/api/overview?range=all&session_sort=turns&session_limit=3&session_offset=0")
+            _, second = get("/api/overview?range=all&session_sort=turns&session_limit=3&session_offset=3")
+        self.assertEqual([r["id"] for r in first["by_session"]], ["ses04", "ses08", "ses12"])
+        self.assertEqual([r["id"] for r in second["by_session"]], ["ses01", "ses02", "ses03"])
+
+    def test_every_sort_key_is_monotonic(self):
+        with self._serve() as get:
+            for mode, field in SORT_FIELDS.items():
+                with self.subTest(sort=mode):
+                    status, body = get(f"/api/overview?range=all&session_sort={mode}&session_limit=0")
+                    self.assertEqual(status, 200)
+                    values = [r[field] for r in body["by_session"]]
+                    self.assertEqual(values, sorted(values, reverse=True), mode)
+                    self.assertEqual(body["sessions_total"], 14)
+
+    def test_unknown_sort_falls_back_instead_of_failing(self):
+        with self._serve() as get:
+            status, body = get("/api/overview?range=all&session_sort=not-a-key&session_limit=0")
+            self.assertEqual(status, 200)
+            values = [r["last"] for r in body["by_session"]]
+            self.assertEqual(values, sorted(values, reverse=True), "未知排序键应回落到默认的按最近")
+
+    def test_search_and_filters(self):
+        with self._serve() as get:
+            _, q = get("/api/overview?range=all&session_q=special&session_limit=0")
+            self.assertEqual([r["id"] for r in q["by_session"]], ["ses07"])
+            self.assertEqual(q["sessions_total"], 1)
+
+            _, proj = get("/api/overview?range=all&session_project=a&session_limit=0")
+            self.assertEqual({r["project_name"] for r in proj["by_session"]}, {"a"})
+            self.assertEqual(proj["sessions_total"], len(proj["by_session"]))
+
+            _, model = get("/api/overview?range=all&session_model=m-gamma&session_limit=0")
+            self.assertEqual([r["id"] for r in model["by_session"]], ["ses04", "ses08", "ses12"])
+
+            # 搜索与筛选叠加：a 项目里标题含 special 的只有 07
+            _, both = get("/api/overview?range=all&session_q=special&session_project=a&session_limit=0")
+            self.assertEqual([r["id"] for r in both["by_session"]], ["ses07"])
+
+    def test_offset_beyond_total_returns_empty_list(self):
+        with self._serve() as get:
+            status, body = get("/api/overview?range=all&session_limit=10&session_offset=99")
+            self.assertEqual(status, 200)
+            self.assertEqual(body["by_session"], [])
+            self.assertEqual(body["sessions_total"], 14)
+
+    def test_pagination_is_applied_after_cache(self):
+        # 分页参数不能进缓存键，否则每翻一页都要重扫全库
+        with self._serve() as get:
+            get("/api/overview?range=all&session_limit=5")
+            get("/api/overview?range=all&session_limit=10&session_offset=5")
+        agg_keys = [k for k in server._CACHE if k.startswith("agg:")]
+        self.assertEqual(agg_keys, ["agg:all"])
+        cached = server._CACHE["agg:all"][1]
+        self.assertEqual(len(cached["by_session"]), 14, "缓存里必须是全量行，分页在响应组装时做")
+
+    def test_bad_paging_params_return_400(self):
+        with self._serve() as get:
+            for path in (
+                "/api/overview?range=all&session_limit=abc",
+                "/api/overview?range=all&session_offset=-1",
+                "/api/overview?range=all&project_limit=x",
+                "/api/overview?range=all&project_offset=-5",
+            ):
+                with self.subTest(path=path):
+                    status, body = get(path)
+                    self.assertEqual(status, 400, body)
+
+
+class ProjectPaginationTest(PagingFixtureMixin, unittest.TestCase):
+    """项目榜：project_limit / offset / sort + projects_total。"""
+
+    def test_pages_and_total(self):
+        with self._serve() as get:
+            status, body = get("/api/overview?range=all&project_limit=1&project_offset=0&project_sort=tokens")
+            self.assertEqual(status, 200)
+            self.assertEqual([r["name"] for r in body["by_project"]], ["a"])
+            self.assertEqual(body["projects_total"], 2)
+
+            _, second = get("/api/overview?range=all&project_limit=1&project_offset=1&project_sort=tokens")
+            self.assertEqual([r["name"] for r in second["by_project"]], ["b"])
+
+    def test_offset_beyond_total_returns_empty_list(self):
+        with self._serve() as get:
+            status, body = get("/api/overview?range=all&project_limit=5&project_offset=9")
+            self.assertEqual(status, 200)
+            self.assertEqual(body["by_project"], [])
+            self.assertEqual(body["projects_total"], 2)
+
+
+class RootsPaginationTest(PagingFixtureMixin, unittest.TestCase):
+    """会话归并表：limit / offset / q / sort + total。"""
+
+    def test_pages_and_total(self):
+        with self._serve() as get:
+            status, body = get("/api/sessions-root?range=all&limit=5&offset=0")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(body["by_root"]), 5)
+            self.assertEqual(body["total"], 12)
+            self.assertEqual([r["id"] for r in body["by_root"]][0], "ses01")
+
+            _, second = get("/api/sessions-root?range=all&limit=5&offset=5")
+            self.assertEqual(len(second["by_root"]), 5)
+            overlap = {r["id"] for r in body["by_root"]} & {r["id"] for r in second["by_root"]}
+            self.assertEqual(overlap, set())
+
+    def test_search_matches_child_titles(self):
+        with self._serve() as get:
+            _, body = get("/api/sessions-root?range=all&q=alpha&limit=0")
+            self.assertEqual([r["id"] for r in body["by_root"]], ["ses01"])
+            self.assertEqual(body["total"], 1)
+
+    def test_offset_beyond_total_returns_empty_list(self):
+        with self._serve() as get:
+            status, body = get("/api/sessions-root?range=all&limit=5&offset=99")
+            self.assertEqual(status, 200)
+            self.assertEqual(body["by_root"], [])
+            self.assertEqual(body["total"], 12)
+
+    def test_bad_paging_params_return_400(self):
+        with self._serve() as get:
+            for path in ("/api/sessions-root?range=all&limit=x", "/api/sessions-root?range=all&offset=-2"):
+                with self.subTest(path=path):
+                    status, body = get(path)
+                    self.assertEqual(status, 400, body)
+
+
+class DatesModePaginationTest(PagingFixtureMixin, unittest.TestCase):
+    """选中日期模式（/api/days-hourly）同样分页：它与 overview 共用同一套参数。"""
+
+    def test_days_hourly_paginates(self):
+        with self._serve() as get:
+            _, full = get(f"/api/days-hourly?dates={self.today_day}&session_sort=tokens&session_limit=0")
+            total = full["sessions_total"]
+            self.assertEqual(total, len(full["by_session"]))
+
+            status, page = get(
+                f"/api/days-hourly?dates={self.today_day}&session_sort=tokens&session_limit=3&session_offset=0"
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(len(page["by_session"]), 3)
+            self.assertEqual(page["sessions_total"], total)
+            self.assertEqual([r["id"] for r in page["by_session"]], [r["id"] for r in full["by_session"][:3]])
+
+    def test_days_hourly_project_pagination(self):
+        with self._serve() as get:
+            status, page = get(f"/api/days-hourly?dates={self.today_day}&project_limit=1&project_offset=1")
+            self.assertEqual(status, 200)
+            self.assertEqual(len(page["by_project"]), 1)
+            self.assertEqual(page["projects_total"], 2)
 
 
 if __name__ == "__main__":
