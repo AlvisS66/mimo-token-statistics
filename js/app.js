@@ -1742,11 +1742,19 @@
   function renderFirstRoundPager(total, pages) {
     const pager = $("#firstround-pager");
     if (!pager) return;
-    pager.hidden = pages <= 1;
+    // 每页条数选择器在这一行里：有行就必须显示，否则「全部」模式下没地方切回分页
+    pager.hidden = total === 0;
     $("#firstround-page-info").textContent = `共 ${exact(total)} 条 · 第 ${state.frPage} / ${pages} 页`;
-    $("#firstround-prev").disabled = state.frPage <= 1;
-    $("#firstround-next").disabled = state.frPage >= pages;
-    renderPageNums(pages);
+    const single = pages <= 1;
+    const nav = $("#firstround-page-nav");
+    if (nav) nav.hidden = single;
+    const jump = $("#firstround-jump");
+    if (jump) jump.hidden = single;
+    if (!single) {
+      $("#firstround-prev").disabled = state.frPage <= 1;
+      $("#firstround-next").disabled = state.frPage >= pages;
+      renderPageNums(pages);
+    }
   }
 
   // 页码按钮：页数多时按 antd 的窗口规则（当前页附近 5 个 + 首末页，缺口用省略号）

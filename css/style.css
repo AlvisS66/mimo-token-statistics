@@ -1409,7 +1409,9 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   font-size: 12px;
 }
 .table-pager-btns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.table-pager-nav { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .table-pager .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+.table-pager .select { height: 28px; padding: 0 6px; font-size: 12px; }
 .table-pager-nums { display: flex; align-items: center; gap: 4px; }
 .table-pager .page-num {
   min-width: 28px;
@@ -2028,6 +2030,11 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
 
   .btn { min-height: 36px; }
   .page-jump input { min-height: 36px; }
+  .table-pager .select { min-height: 36px; }
+  /* 窄屏收紧翻页行，免得「下一页」被挤到单独一行 */
+  .table-pager { gap: 8px; }
+  .table-pager .btn { padding: 0 8px; }
+  .table-pager .page-num { min-width: 26px; }
   .top-grid { grid-template-columns: 1fr; }
 
   /* 会话详情 / 设置弹窗：更贴边、更好读 */
