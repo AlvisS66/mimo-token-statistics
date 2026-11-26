@@ -839,6 +839,11 @@ class SessionPaginationTest(PagingFixtureMixin, unittest.TestCase):
             self.assertEqual([r["id"] for r in q["by_session"]], ["ses07"])
             self.assertEqual(q["sessions_total"], 1)
 
+            # 先过滤再切片：若实现反了，limit=1 拿到的是未匹配的 ses01，结果是空
+            _, q1 = get("/api/overview?range=all&session_q=special&session_limit=1")
+            self.assertEqual([r["id"] for r in q1["by_session"]], ["ses07"])
+            self.assertEqual(q1["sessions_total"], 1)
+
             _, proj = get("/api/overview?range=all&session_project=a&session_limit=0")
             self.assertEqual({r["project_name"] for r in proj["by_session"]}, {"a"})
             self.assertEqual(proj["sessions_total"], len(proj["by_session"]))
@@ -878,6 +883,8 @@ class SessionPaginationTest(PagingFixtureMixin, unittest.TestCase):
                 with self.subTest(path=path):
                     status, body = get(path)
                     self.assertEqual(status, 400, body)
+                    # 报错要指名是哪个参数坏了
+                    self.assertIn("limit" if "limit" in path else "offset", body.get("error", ""))
 
 
 class ProjectPaginationTest(PagingFixtureMixin, unittest.TestCase):
@@ -892,6 +899,14 @@ class ProjectPaginationTest(PagingFixtureMixin, unittest.TestCase):
 
             _, second = get("/api/overview?range=all&project_limit=1&project_offset=1&project_sort=tokens")
             self.assertEqual([r["name"] for r in second["by_project"]], ["b"])
+
+    def test_project_sort_is_honored(self):
+        # a 的 tokens 更大、b 更近（fixture 刻意错开）：忽略 project_sort 则永远拿不到 b
+        with self._serve() as get:
+            _, default = get("/api/overview?range=all&project_limit=1")
+            self.assertEqual([r["name"] for r in default["by_project"]], ["a"])
+            _, by_last = get("/api/overview?range=all&project_limit=1&project_sort=last")
+            self.assertEqual([r["name"] for r in by_last["by_project"]], ["b"])
 
     def test_offset_beyond_total_returns_empty_list(self):
         with self._serve() as get:
@@ -923,6 +938,13 @@ class RootsPaginationTest(PagingFixtureMixin, unittest.TestCase):
             self.assertEqual(len(second["by_root"]), 5)
             overlap = {r["id"] for r in body["by_root"]} & {r["id"] for r in second["by_root"]}
             self.assertEqual(overlap, set())
+
+    def test_sort_is_honored(self):
+        # 默认 tokens 降序给 01；按最近应给 12（fixture 里编号越大越新）
+        with self._serve() as get:
+            _, by_last = get("/api/sessions-root?range=all&sort=last&limit=1")
+            self.assertEqual([r["id"] for r in by_last["by_root"]], ["ses12"])
+            self.assertEqual(by_last["total"], 12)
 
     def test_search_matches_child_titles(self):
         with self._serve() as get:
