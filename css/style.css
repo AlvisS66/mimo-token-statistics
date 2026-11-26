@@ -2027,6 +2027,7 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   .data-table td:last-child { width: 28%; }
 
   .btn { min-height: 36px; }
+  .page-jump input { min-height: 36px; }
   .top-grid { grid-template-columns: 1fr; }
 
   /* 会话详情 / 设置弹窗：更贴边、更好读 */

@@ -1753,6 +1753,8 @@
   function renderPageNums(pages) {
     const box = $("#firstround-page-nums");
     if (!box) return;
+    // 重建会销毁刚被点的按钮，键盘焦点会掉回 body：重建后把焦点放回当前页
+    const hadFocus = box.contains(document.activeElement);
     const cur = state.frPage;
     const nums = [];
     if (pages <= 7) {
@@ -1777,6 +1779,7 @@
         return `${gap}<button type="button" class="btn ghost page-num${active ? " active" : ""}" data-page="${n}"${active ? ' aria-current="page"' : ""}>${n}</button>`;
       })
       .join("");
+    if (hadFocus) box.querySelector(".page-num.active")?.focus();
   }
 
   function renderRoots() {
