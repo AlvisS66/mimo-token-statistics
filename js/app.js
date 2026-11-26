@@ -287,7 +287,6 @@
       );
       state.data = data;
       if (data.ok) {
-        applySessionsPage(data);
         renderAll(data);
         hideBanner();
         loadDimensions();
@@ -722,6 +721,8 @@
     loadDimensions();
     syncSessionsPageKey();
     syncProjectsPageKey();
+    // 这张响应会连带写会话表与项目榜：口径（含 offset）变了就不再落这块
+    const rankSig = `${sessionQuery()}|${projectQuery()}`;
     try {
       const d = await fetchJSON(
         `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${rankQuery()}`
@@ -756,8 +757,8 @@
           },
         })
       );
-      // 模型 / 项目 / 会话跟随选中日期
-      applySelectedDayRanks(d);
+      // 模型 / 项目 / 会话跟随选中日期；期间口径变过就跳过（否则把表改回旧筛选的第 1 页）
+      if (rankSig === `${sessionQuery()}|${projectQuery()}`) applySelectedDayRanks(d);
     } catch (_) {}
   }
 
@@ -774,11 +775,13 @@
   }
 
   function closeDayDetail() {
+    const hadSelection = state.selectedDayDates.length > 0;
     state.selectedDayDates = [];
     persistDaySelection();
     const box = $("#day-detail");
     closeDetailPanel(box);
     $$(".hm-cell.selected").forEach((c) => c.classList.remove("selected"));
+    if (!hadSelection) return; // 本来就没选日期：不用为「回到区间」再取一遍两张表
     restoreRangeRanks();
     syncHourlyForDays(null);
     loadDimensions();
@@ -1613,6 +1616,8 @@
     const range = encodeURIComponent(state.range);
     const dates = dimsQuery();
     syncRootsPageKey();
+    // 归并表还有另一条写入口（reloadRoots）：记下口径 + 页码 + 序号，回来时对不上就整块丢掉
+    const rootsSig = `${rootsPageKey()}|${state.rootsPage}|${state.rootsReqId}`;
     const [agents, roots] = await Promise.all([
       fetchJSON(`/api/agents?range=${range}${dates}`).catch(() => null),
       fetchJSON(`/api/sessions-root?range=${range}${dates}&${rootsQuery()}`).catch(() => null),
@@ -1620,7 +1625,8 @@
     // 快速切换日期时丢弃过期响应：过期数据连 state 都不能进，否则下次重渲染会翻出旧日期的数
     if (reqId !== state.dimsReqId) return;
     if (agents?.ok) state.agents = agents;
-    if (roots?.ok) {
+    const rootsFresh = rootsSig === `${rootsPageKey()}|${state.rootsPage}|${state.rootsReqId}`;
+    if (roots?.ok && rootsFresh) {
       state.roots = roots;
       state.rootsTotal = Number(roots.total || 0);
     }
