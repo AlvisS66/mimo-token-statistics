@@ -411,11 +411,16 @@ class DatesSelectionTest(FixtureMixin, unittest.TestCase):
                 server.aggregate_agents("7", dates=bad)
 
     def test_days_hourly_honors_max_dates(self):
-        # MAX_DATES 的注释说它与 /api/days-hourly 的上限一致，这里锁住这层一致
-        many = [server.day_key(self.t_today - i * DAY_MS) for i in range(40)]
-        out = server.get_days_hourly(many)
-        self.assertEqual(out["dates"], many[: server.MAX_DATES])
-        self.assertEqual(out["day_count"], server.MAX_DATES)
+        # MAX_DATES 是维度接口与 /api/days-hourly 共用的上限：改小它，days-hourly 也必须跟着变——
+        # 默认值下写死 32 的旧实现也能过，只有改小才露馅
+        saved, server.MAX_DATES = server.MAX_DATES, 3
+        try:
+            many = [server.day_key(self.t_today - i * DAY_MS) for i in range(40)]
+            out = server.get_days_hourly(many)
+        finally:
+            server.MAX_DATES = saved
+        self.assertEqual(out["dates"], many[:3])
+        self.assertEqual(out["day_count"], 3)
 
     def test_window_helpers(self):
         since, wanted = server.selection_window("7")
