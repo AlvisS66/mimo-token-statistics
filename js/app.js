@@ -400,7 +400,7 @@
       if (hsub0) hsub0.textContent = `${data.range_label || ""} · 按小时`;
       renderModels(data.by_model || []);
       applyProjectsPage(data);
-      populateModelFilter(data);
+      const filterChanged = populateModelFilter(data);
       applySessionsPage(data);
       const msub0 = $("#models-sub");
       const psub0 = $("#projects-sub");
@@ -408,6 +408,8 @@
       if (msub0) msub0.textContent = data.range_label || "";
       if (psub0) psub0.textContent = data.range_label || "";
       if (ssub0) ssub0.textContent = data.range_label || "";
+      // 筛选值被就地清空时，这页是按旧值取的，得按新值重取
+      if (filterChanged) reloadSessions();
     }
     renderInsights(data);
 
@@ -672,23 +674,29 @@
   function restoreRangeRanks() {
     const data = state.data;
     if (!data) return;
-    renderModels(data.by_model || []);
-    applyProjectsPage(data);
-    populateModelFilter(data);
-    applySessionsPage(data);
     const msub = $("#models-sub");
     const psub = $("#projects-sub");
     const ssub = $("#sessions-sub");
     if (msub) msub.textContent = data.range_label || "";
     if (psub) psub.textContent = data.range_label || "";
     if (ssub) ssub.textContent = data.range_label || "";
+    renderModels(data.by_model || []);
+    populateModelFilter(data);
+    // state.data 是进日期模式之前那次响应的快照，页码可能已经被日期模式改过：
+    // 用它重画会话 / 项目两张表会「行是旧页、页码是新页」，所以重新取一次。
+    reloadSessions();
+    reloadProjects();
   }
 
   function applySelectedDayRanks(d) {
     const label = selectionLabel(state.selectedDayDates);
     renderModels(d.by_model || []);
     applyProjectsPage(d);
-    populateModelFilter({ by_model: d.by_model || [], by_project: d.by_project || [], project_names: d.project_names });
+    const changed = populateModelFilter({
+      by_model: d.by_model || [],
+      by_project: d.by_project || [],
+      project_names: d.project_names,
+    });
     applySessionsPage(d);
     const msub = $("#models-sub");
     const psub = $("#projects-sub");
@@ -696,6 +704,8 @@
     if (msub) msub.textContent = label;
     if (psub) psub.textContent = label;
     if (ssub) ssub.textContent = label;
+    // 筛选值被就地清空时，上面这页是按旧筛选值取的，得按新值重取
+    if (changed) reloadSessions();
   }
 
   async function syncDaysDetail(dates) {
@@ -1377,7 +1387,9 @@
   }
 
   // ── sessions ──────────────────────────────────────────────
+  // 返回 true 表示有筛选值因为新数据里不存在而被就地清空（调用方要按新值重取）
   function populateModelFilter(data) {
+    let changed = false;
     const sel = $("#session-model-filter");
     if (sel) {
       const models = (data.by_model || []).map((m) => m.model);
@@ -1387,6 +1399,7 @@
         models.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
       if (cur && models.includes(cur)) sel.value = cur;
       else {
+        if (cur) changed = true;
         state.modelFilter = "";
         sel.value = "";
       }
@@ -1400,12 +1413,14 @@
         projects.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
       if (cur && projects.includes(cur)) psel.value = cur;
       else {
+        if (cur) changed = true;
         state.projectFilter = "";
         psel.value = "";
       }
     }
     const sortSel = $("#session-sort");
     if (sortSel) sortSel.value = state.sort || "last";
+    return changed;
   }
 
   // 会话用量的口径：过滤 / 排序 / 分页都在服务端做，这里只负责拼参数
@@ -1480,13 +1495,14 @@
   async function reloadProjects() {
     syncProjectsPageKey();
     const reqId = ++state.projectsReqId;
+    const key = projectPageKey();
     const dates = state.selectedDayDates;
     const url = dates.length
       ? `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${projectQuery()}`
       : `/api/overview?range=${encodeURIComponent(state.range)}&${projectQuery()}`;
     try {
       const data = await fetchJSON(url);
-      if (reqId !== state.projectsReqId) return;
+      if (reqId !== state.projectsReqId || key !== projectPageKey()) return;
       if (data.ok) applyProjectsPage(data);
     } catch (_) {}
   }
@@ -1499,13 +1515,15 @@
   async function reloadSessions() {
     syncSessionsPageKey();
     const reqId = ++state.sessionsReqId;
+    // 口径也记一份：loadOverview / 选日期都不经过 sessionsReqId，只比序号会放过旧口径的响应
+    const key = sessionPageKey();
     const dates = state.selectedDayDates;
     const url = dates.length
       ? `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${sessionQuery()}`
       : `/api/overview?range=${encodeURIComponent(state.range)}&${sessionQuery()}`;
     try {
       const data = await fetchJSON(url);
-      if (reqId !== state.sessionsReqId) return; // 连改筛选时丢掉过期响应
+      if (reqId !== state.sessionsReqId || key !== sessionPageKey()) return; // 丢掉过期响应
       if (data.ok) applySessionsPage(data);
     } catch (_) {}
   }
@@ -1954,11 +1972,12 @@
   async function reloadRoots() {
     syncRootsPageKey();
     const reqId = ++state.rootsReqId;
+    const key = rootsPageKey();
     try {
       const data = await fetchJSON(
         `/api/sessions-root?range=${encodeURIComponent(state.range)}${dimsQuery()}&${rootsQuery()}`
       );
-      if (reqId !== state.rootsReqId) return; // 连打搜索词时丢掉过期响应
+      if (reqId !== state.rootsReqId || key !== rootsPageKey()) return; // 丢掉过期响应
       if (data.ok) {
         state.roots = data;
         state.rootsTotal = Number(data.total || 0);
