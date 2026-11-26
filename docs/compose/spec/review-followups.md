@@ -71,6 +71,10 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 
 改为解析后的路径必须落在 `assets/`、`css/`、`js/` 三个目录之一，其余一律 403（`STATIC_DIRS` 一处定义，路由前缀判断与解析校验共用）。`index.html` 仍只经 `/` 与 `/index.html` 路由、过鉴权后提供。
 
+### S2.9 首轮加载的竞态（评审跟进，合并前追加）
+
+`#firstround-agent` 的 change 处理独立调用 `loadFirstRound()`，只受 `dimsReqId` 约束——连改两次 agent 时，先发的响应后到会覆盖后发的结果：下拉显示 B，表格却是 A。`loadFirstRound` 自带 `frReqId`，响应同时对照「后一次首轮加载」与「后一次维度加载」，任一过期即丢弃。
+
 ## [S3] Out of Scope
 
 - 密码持久化（需单独决定存储位置与哈希方案）。
@@ -92,6 +96,7 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - [x] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 - [x] T9: 版本串升 `1.0.3` + `RELEASE_NOTES_v1.0.3.md` — acceptance: `server.py` 中不再出现 `1.0.2`；发布说明覆盖本次全部接口变更 (covers: S2.7) (depends: T8)
 - [x] T10: 静态路由只放行 `assets` / `css` / `js` 三个目录 — acceptance: 测试断言 `_resolve_static("css/../server.py")` 为 `None` 而 `css/style.css` 正常；未鉴权请求 `/css/../server.py`、`/assets/../index.html`、`/js/../README.md` 均回 403，`/css/style.css` 回 200 (covers: S2.8)
+- [x] T11: `loadFirstRound` 加 `frReqId`，覆盖 agent 下拉连改的竞态 — acceptance: 浏览器把 `agent=checkpoint-writer-1` 的首轮响应拖慢 1.5 s、随即改选 `main`，慢响应到达后表格仍只含 `main`（改动前会变成 `checkpoint-writer-1`） (covers: S2.9)
 
 ## Journey log
 
@@ -121,3 +126,5 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
   - 未处理的评审项（既有问题，原超出本 spec；用户已确认追加为 T10–T13）：agent 下拉连改的竞态（`app.js` 的 `firstround-agent` change 处理不经过守门）；选中日期时该 agent 当日无数据会被清空筛选（与「先校正再取首轮」的既有设计决定相关）；`/css/../server.py` 等仓库根目录内的文件可经静态路由未登录读取（`main` 上同样存在）。
 - **评审跟进（合并前追加，用户确认）**：评审留下的既有问题里，`main` 上同样存在的四项由用户确认一并修掉（T10–T13），作为本 spec 的修订。
 - **T10**：先用未鉴权的 HTTP 用例复现——`/css/../server.py` 在旧实现上回 200。修复后回 403，`StaticPathTest` 之外的放行目录文件仍免鉴权可取，测试 43 条。
+- **T11–T13 的基线**：三项都写不了单测（仓库没有 JS 测试框架），证据改成有头浏览器对照——先在未改动的前端（`e1291cd`）上跑一遍留底：拖慢先发的响应后，表格变成 `checkpoint-writer-1` 而下拉是 `main`；选 `checkpoint-writer-1` 再点 2026-11-23，筛选被清空；选中日期后点一次刷新，`/api/agents` 发了 2 次。改完后跑同一个脚本对照。
+- **T11**：加 `frReqId` 后，慢响应到达时表格仍是 `main`；T12 / T13 的读数与基线相同，说明这项改动没有波及它们。

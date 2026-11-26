@@ -79,6 +79,7 @@
     hourlyDay: null,
     hourlyReqId: 0,
     dimsReqId: 0,
+    frReqId: 0,
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
@@ -1500,12 +1501,14 @@
   }
 
   async function loadFirstRound() {
-    const reqId = state.dimsReqId;
+    // 切换 agent 筛选是独立调用、不经过 dimsReqId：连改两次时先发的响应后到，会把结果覆盖成上一个 agent
+    const frReqId = ++state.frReqId;
+    const dimsReqId = state.dimsReqId;
     const range = encodeURIComponent(state.range);
     const agent = state.frAgent ? `&agent=${encodeURIComponent(state.frAgent)}` : "";
     try {
       const d = await fetchJSON(`/api/first-round?range=${range}${agent}${dimsQuery()}`);
-      if (reqId !== state.dimsReqId) return;
+      if (frReqId !== state.frReqId || dimsReqId !== state.dimsReqId) return;
       if (d.ok) state.firstRound = d;
     } catch (_) {}
   }
