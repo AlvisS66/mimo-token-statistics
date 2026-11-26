@@ -96,6 +96,7 @@
     frBucket: "",
     frLimit: Number(localStorage.getItem("mimo-ts-fr-limit") || 10),
     frPage: 1,
+    frPageKey: "",
     firstRound: null,
     rootsSearch: "",
     rootsLimit: Number(localStorage.getItem("mimo-ts-roots-limit") || 5),
@@ -1687,6 +1688,13 @@
       );
     }
     rows.sort((a, b) => order[a.bucket] - order[b.bucket] || a.hit - b.hit || b.total - a.total);
+
+    // 口径（范围 / 日期 / agent / 分桶 / 搜索词 / 页大小）变了回第 1 页；口径不变的重画（自动刷新、手动刷新）保留页码
+    const pageKey = `${firstRoundQuery()}|${state.frBucket}|${q}|${state.frLimit}`;
+    if (pageKey !== state.frPageKey) {
+      state.frPageKey = pageKey;
+      state.frPage = 1;
+    }
 
     // 「全部」(0) 一页画完；行数变少后页码可能越界（切范围、刷新），收到最后一页
     const size = state.frLimit > 0 ? state.frLimit : rows.length;
