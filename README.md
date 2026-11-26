@@ -151,7 +151,7 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 
 会话榜、项目榜、根会话榜都是**服务端分页**：聚合结果缓存全量行，分页在响应组装时切分，所以翻页不会重扫数据库。
 
-- 缺省条数与旧版一致：`session_limit` 默认 50、`project_limit` 默认 30、`limit` 默认 100，`0` 表示不分页。注意缺省**排序**变了：不带 `*_sort` 时会话榜按 `last` 降序（旧版是 `tokens` 降序），项目榜与根会话榜仍是 `tokens` 降序
+- 缺省条数与旧版一致：`session_limit` 默认 50、`project_limit` 默认 30、`limit` 默认 100，`0` 表示不分页。注意直接调接口时缺省**排序**变了：不带 `*_sort` 时会话榜按 `last` 降序（旧版是 `tokens` 降序），项目榜与根会话榜仍是 `tokens` 降序；界面不受影响（前端一直显式传 `session_sort`，默认就是按最近）
 - 过滤与排序在服务端做：`session_q`（标题 / 项目 / 目录 / 会话 id / 模型名，小写子串匹配）、`session_project`、`session_model`、根会话的 `q`（标题 / 项目 / 子会话标题）
 - `*_sort` / `sort` 支持 `tokens` / `turns` / `avg` / `input` / `output` / `cache` / `hit` / `last`，默认会话榜按 `last`、项目榜与根会话榜按 `tokens`；并列时先比 `tokens` 再比 `id`
 - 响应里的 `sessions_total` / `projects_total` / `total` 是**过滤后、分页前**的总数，界面用它算页数；`project_names` 是全量项目名（不受 `project_limit` 影响）
