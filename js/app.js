@@ -2275,6 +2275,9 @@
 
   function closeDrawer() {
     state.drawerReqId += 1; // 丢掉在途的会话响应
+    state.drawerTurns = [];
+    state.drawerShown = 0;
+    state.drawerTurnTotal = 0;
     const drawer = $("#drawer");
     const backdrop = $("#drawer-backdrop");
     drawer?.classList.remove("open");
