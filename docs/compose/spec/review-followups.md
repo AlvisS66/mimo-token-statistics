@@ -75,6 +75,12 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 
 `#firstround-agent` 的 change 处理独立调用 `loadFirstRound()`，只受 `dimsReqId` 约束——连改两次 agent 时，先发的响应后到会覆盖后发的结果：下拉显示 B，表格却是 A。`loadFirstRound` 自带 `frReqId`，响应同时对照「后一次首轮加载」与「后一次维度加载」，任一过期即丢弃。
 
+### S2.10 日期模式下保留 agent 筛选（评审跟进，合并前追加）
+
+`populateFirstRoundAgentFilter` 以 `/api/agents` 的列表为准「先校正、再取首轮」：本地记下的 agent 不在列表里就清空，让失效的筛选能自愈。但带 `dates` 时列表只有这些天有数据的 agent，同一规则会把「当天没数据」的筛选也清掉。
+
+区分两种列表：响应自带 `dates`（按日期筛过）时，当前 agent 不在列表里则保留下拉选项并标注「所选日期无数据」，表格照常显示空状态；不带 `dates`（区间）时沿用原规则校正。回到区间后该 agent 若仍无数据，筛选照旧被清空。
+
 ## [S3] Out of Scope
 
 - 密码持久化（需单独决定存储位置与哈希方案）。
@@ -97,6 +103,7 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - [x] T9: 版本串升 `1.0.3` + `RELEASE_NOTES_v1.0.3.md` — acceptance: `server.py` 中不再出现 `1.0.2`；发布说明覆盖本次全部接口变更 (covers: S2.7) (depends: T8)
 - [x] T10: 静态路由只放行 `assets` / `css` / `js` 三个目录 — acceptance: 测试断言 `_resolve_static("css/../server.py")` 为 `None` 而 `css/style.css` 正常；未鉴权请求 `/css/../server.py`、`/assets/../index.html`、`/js/../README.md` 均回 403，`/css/style.css` 回 200 (covers: S2.8)
 - [x] T11: `loadFirstRound` 加 `frReqId`，覆盖 agent 下拉连改的竞态 — acceptance: 浏览器把 `agent=checkpoint-writer-1` 的首轮响应拖慢 1.5 s、随即改选 `main`，慢响应到达后表格仍只含 `main`（改动前会变成 `checkpoint-writer-1`） (covers: S2.9)
+- [x] T12: 日期模式下保留当日无数据的 agent 筛选 — acceptance: 选 `checkpoint-writer-1` 后点 2026-11-23（当天只有 `main` 有数据），下拉仍为 `checkpoint-writer-1` 并带「所选日期无数据」标注、表格显示空状态；取消日期后筛选仍是 `checkpoint-writer-1`（改动前两处都被清成「全部 agent」） (covers: S2.10)
 
 ## Journey log
 
@@ -128,3 +135,4 @@ Implement 完成后由用户确认追加（spec 原先未含，但项目惯例�
 - **T10**：先用未鉴权的 HTTP 用例复现——`/css/../server.py` 在旧实现上回 200。修复后回 403，`StaticPathTest` 之外的放行目录文件仍免鉴权可取，测试 43 条。
 - **T11–T13 的基线**：三项都写不了单测（仓库没有 JS 测试框架），证据改成有头浏览器对照——先在未改动的前端（`e1291cd`）上跑一遍留底：拖慢先发的响应后，表格变成 `checkpoint-writer-1` 而下拉是 `main`；选 `checkpoint-writer-1` 再点 2026-11-23，筛选被清空；选中日期后点一次刷新，`/api/agents` 发了 2 次。改完后跑同一个脚本对照。
 - **T11**：加 `frReqId` 后，慢响应到达时表格仍是 `main`；T12 / T13 的读数与基线相同，说明这项改动没有波及它们。
+- **T12**：是否保留下拉选项，看的是响应自带的 `dates`，而不是「当前有没有选中日期」——维度接口请求失败时 `state.agents` 还是区间的那份，按后者判断会给它错贴「所选日期无数据」的标注。

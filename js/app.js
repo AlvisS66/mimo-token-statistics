@@ -1517,10 +1517,15 @@
     const sel = $("#firstround-agent");
     if (!sel) return;
     const agents = (state.agents?.by_agent || []).map((a) => a.agent);
+    const current = state.frAgent;
+    const listed = agents.includes(current);
+    // 按日期筛过的列表只有这些天有数据的 agent，缺的不代表失效：保留当前筛选并标明原因，回到区间再校正
+    const keep = !listed && state.agents?.dates?.length ? current : "";
     sel.innerHTML =
       `<option value="">全部 agent</option>` +
-      agents.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
-    sel.value = agents.includes(state.frAgent) ? state.frAgent : "";
+      agents.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("") +
+      (keep ? `<option value="${escapeHtml(keep)}">${escapeHtml(keep)}（所选日期无数据）</option>` : "");
+    sel.value = listed || keep ? current : "";
     if (!sel.value && state.frAgent) state.frAgent = "";
   }
 
