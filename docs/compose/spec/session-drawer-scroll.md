@@ -77,7 +77,7 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - [x] T1: 服务端 turn 加 `provider` / `variant` — acceptance: `parse_tokens` 返回这两个键（缺字段为 `None`），`session_detail` 的每条 `turns[]` 带上它们；测试 fixture 的 `_assistant()` 支持传入 provider/variant，新增用例断言值正确且缺省为 `null`；其余既有用例仍全绿 (covers: S2.1)
 - [x] T2: 卡片渲染三项信息与样式 — acceptance: 有头场景里卡片在**同一行**显示模型名、服务商 chip、`思考 max` chip；`variant` 缺失时显示 `思考 默认` 并用中性样式；两项都缺时这一行只有模型名；深色与浅色主题都清晰可读，390 px 宽不横向溢出 (covers: S2.2)
 - [x] T3: 滚动加载 — acceptance: 服务端不再截断 `turns`（删 `turns[-200:]`，用 210 条请求的用例锁住）；打开一个上千条消息的会话，首屏只渲染 50 条且提示 `已显示 50 / N 条`；滚到底自动追加到 100、150…，滚动位置不跳、已渲染卡片不重排；全部加载完提示变 `共 N 条`；关闭再打开计数归零 (covers: S2.3)
-- [ ] T4: 版本串 1.0.5 + 发布说明 + README — acceptance: `Server` 头为 `MiMoTokenStats/1.0.5`，`RELEASE_NOTES_v1.0.5.md` 写明两项改动，README 的 `/api/session` 行提到 `provider` / `variant` (covers: S2.1)
+- [x] T4: 版本串 1.0.5 + 发布说明 + README — acceptance: `Server` 头为 `MiMoTokenStats/1.0.5`，`RELEASE_NOTES_v1.0.5.md` 写明两项改动，README 的 `/api/session` 行提到 `provider` / `variant` (covers: S2.1)
 - [x] T5: 模型分布行显示服务商（用户追加）— acceptance: `session_detail()["models"][]` 带 `providers`（按条数降序、无服务商为空数组），前端模型名右边显示同款 chip；测试 fixture 里同一模型有 `prov-a` 与缺失两种请求时用例能区分 (covers: S2.4)
 
 ## Journey log
@@ -86,3 +86,4 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 2026-11-26 实现 T3 时发现 `session_detail()` 里还有一处 `turns[-200:]`：有头场景滚到底停在 `已显示 200 / 995 条`，与 S1 原先「接口返回全部」的判断不符 ⇒ 先补失败用例（fixture 里插 210 条请求，旧实现回 200）再删掉截断，用例全绿后场景才通过。
 - 2026-11-26 用户追加两条 UI 要求（截图指认）：① 服务商 / 思考强度与模型名放**同一行**（原设计是另起一行 meta）；② 抽屉的「模型分布」每行也要显示服务商。已原地扩写 S2.2、新增 S2.4 与任务 T5（不重编号）。
 - 2026-11-26 T2/T3/T5 实现与验收（同一份有头场景 `drawer.js` / `models.js` / `theme.js`，放在系统临时目录、不进仓库）：995 条的会话首屏 50 条（提示 `已显示 50 / 995 条`）→ 滚到底逐批追加 → `共 995 条`，全程 1.1 s、滚动位置不跳；卡片 `lineOffsets` 实测 `[0,0]`（chip 与模型名中线零偏差）；`模型分布` 每行带服务商，`ses_ffe5e5a6c…` 的 `deepseek-flash` 列出 `kg-newapi` + `deepseek` 两家；两项都缺的老数据（用 `page.route` 抹掉最后一条请求的两个字段构造）只显示模型名；深/浅主题对比度实测 服务商 5.59 / 3.93、思考强度 6.57 / 4.33；390 px 宽卡片与模型行均无横向溢出。
+- 2026-11-26 T4：`server_version` 升 `MiMoTokenStats/1.0.5`、补 `RELEASE_NOTES_v1.0.5.md`、README 的 `/api/session` 行写明「全部请求 + provider / variant / providers」；实测响应头与坏参数行为与 1.0.4 一致（只加字段）。

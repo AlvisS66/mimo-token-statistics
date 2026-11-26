@@ -136,7 +136,7 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 | GET | `/api/overview?range=` | 聚合统计。`range`: `today` \| `7` \| `14` \| `30` \| `90` \| `all`（别名 `/api/usage`）。会话榜支持 `session_limit` / `session_offset` / `session_sort` / `session_q` / `session_project` / `session_model`，项目榜支持 `project_limit` / `project_offset` / `project_sort`；响应带 `sessions_total` / `projects_total` / `project_names` |
 | GET | `/api/day-hourly?date=` | 某日 24 小时分模型（日历联动） |
 | GET | `/api/days-hourly?dates=` | 多日合并小时分布，`dates` 为逗号分隔日期（Shift 多选）；分页参数与总数字段和 `/api/overview` 相同 |
-| GET | `/api/session?id=` | 单会话明细（最近请求列表） |
+| GET | `/api/session?id=` | 单会话明细：全部请求（`turns[]` 每条带 `model` / `provider` / `variant` 与 token 明细），`models[]` 每行带 `providers`（该模型用过的服务商，按请求数降序） |
 | GET | `/api/agents?range=&dates=` | **按 agent 汇总**：用量、命中率、会话数、分模型明细 |
 | GET | `/api/first-round?range=&agent=&dates=` | **首轮命中**：分桶（0% / 1–50% / 50–90% / 90–100%）+ 每会话明细 + `pending` 未落盘计数。`agent` 支持前缀（`checkpoint-writer` 可命中 `checkpoint-writer-1`） |
 | GET | `/api/sessions-root?range=&dates=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细。支持 `limit` / `offset` / `q` / `sort`；响应带 `total`（过滤后、分页前的根会话数） |
