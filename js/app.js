@@ -113,7 +113,11 @@
     frPageKey: "",
     firstRound: null,
     rootsSearch: "",
-    rootsLimit: Number(localStorage.getItem("mimo-ts-roots-limit") || 5),
+    rootsLimit: readPageSize("mimo-ts-roots-limit"),
+    rootsPage: 1,
+    rootsPageKey: "",
+    rootsTotal: 0,
+    rootsReqId: 0,
     roots: null,
   };
 
@@ -1590,14 +1594,18 @@
     const reqId = ++state.dimsReqId;
     const range = encodeURIComponent(state.range);
     const dates = dimsQuery();
+    syncRootsPageKey();
     const [agents, roots] = await Promise.all([
       fetchJSON(`/api/agents?range=${range}${dates}`).catch(() => null),
-      fetchJSON(`/api/sessions-root?range=${range}${dates}`).catch(() => null),
+      fetchJSON(`/api/sessions-root?range=${range}${dates}&${rootsQuery()}`).catch(() => null),
     ]);
     // 快速切换日期时丢弃过期响应：过期数据连 state 都不能进，否则下次重渲染会翻出旧日期的数
     if (reqId !== state.dimsReqId) return;
     if (agents?.ok) state.agents = agents;
-    if (roots?.ok) state.roots = roots;
+    if (roots?.ok) {
+      state.roots = roots;
+      state.rootsTotal = Number(roots.total || 0);
+    }
     // 先校正筛选值（本地记下的 agent 可能已经不存在），再按校正后的值取首轮
     populateFirstRoundAgentFilter();
     await loadFirstRound();
@@ -1919,6 +1927,46 @@
     el.limit?.addEventListener("change", (e) => setSize(Number(e.target.value) || 0));
   }
 
+  // ── 会话归并（服务端分页） ────────────────────────────────
+  function rootsPageKey() {
+    return [state.range, state.selectedDayDates.join(","), state.rootsSearch.trim(), state.rootsLimit].join("|");
+  }
+
+  function syncRootsPageKey() {
+    const key = rootsPageKey();
+    if (key !== state.rootsPageKey) {
+      state.rootsPageKey = key;
+      state.rootsPage = 1;
+    }
+  }
+
+  function rootsQuery() {
+    const size = state.rootsLimit;
+    const params = new URLSearchParams({
+      limit: String(size),
+      offset: String(size > 0 ? Math.max(0, state.rootsPage - 1) * size : 0),
+    });
+    const q = state.rootsSearch.trim();
+    if (q) params.set("q", q);
+    return params.toString();
+  }
+
+  async function reloadRoots() {
+    syncRootsPageKey();
+    const reqId = ++state.rootsReqId;
+    try {
+      const data = await fetchJSON(
+        `/api/sessions-root?range=${encodeURIComponent(state.range)}${dimsQuery()}&${rootsQuery()}`
+      );
+      if (reqId !== state.rootsReqId) return; // 连打搜索词时丢掉过期响应
+      if (data.ok) {
+        state.roots = data;
+        state.rootsTotal = Number(data.total || 0);
+        renderRoots();
+      }
+    } catch (_) {}
+  }
+
   function renderRoots() {
     const tbody = $("#roots-tbody");
     const empty = $("#roots-empty");
@@ -1929,25 +1977,24 @@
       const tt = d?.totals || {};
       sub.textContent = `${dimsLabel(d)} · ${tt.roots || 0} 个根会话，已并入 ${tt.child_sessions || 0} 个子会话（${formatTok(tt.child_tokens || 0)}）`;
     }
-    const q = (state.rootsSearch || "").trim().toLowerCase();
-    let rows = (d?.by_root || []).slice();
-    if (q) {
-      rows = rows.filter(
-        (r) =>
-          (r.title || "").toLowerCase().includes(q) ||
-          (r.project_name || "").toLowerCase().includes(q) ||
-          (r.children || []).some((c) => (c.title || "").toLowerCase().includes(q))
-      );
+    const total = state.rootsTotal;
+    const size = state.rootsLimit;
+    const pages = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+    if (state.rootsPage > pages) {
+      // 搜索收窄后页码越界：收到最后一页再画
+      state.rootsPage = pages;
+      reloadRoots();
+      return;
     }
+    renderPager("roots", total, state.rootsPage, pages);
+    const rows = d?.by_root || [];
     if (!rows.length) {
       tbody.innerHTML = "";
-      if (empty) empty.hidden = false;
+      if (empty) empty.hidden = total > 0;
       return;
     }
     if (empty) empty.hidden = true;
-    const limit = state.rootsLimit > 0 ? state.rootsLimit : rows.length;
     tbody.innerHTML = rows
-      .slice(0, limit)
       .map((r) => {
         const childMeta = r.children?.length
           ? `${r.children.length} 个子会话 · ${formatTok(r.child_tokens)}`
@@ -2548,19 +2595,26 @@
       }, 160)
     );
 
-    $("#roots-limit")?.addEventListener("change", (e) => {
-      state.rootsLimit = Number(e.target.value) || 0;
-      localStorage.setItem("mimo-ts-roots-limit", String(state.rootsLimit));
-      renderRoots();
-    });
-
     $("#roots-search")?.addEventListener(
       "input",
       debounce((e) => {
         state.rootsSearch = e.target.value || "";
-        renderRoots();
+        reloadRoots();
       }, 160)
     );
+
+    bindPager("roots", {
+      getPage: () => state.rootsPage,
+      go: (page) => {
+        state.rootsPage = page;
+        reloadRoots();
+      },
+      setSize: (value) => {
+        state.rootsLimit = value;
+        localStorage.setItem("mimo-ts-roots-limit", String(state.rootsLimit));
+        reloadRoots();
+      },
+    });
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {

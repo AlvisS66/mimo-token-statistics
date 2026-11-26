@@ -419,12 +419,6 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
               <input type="search" id="roots-search" placeholder="搜索根会话…" autocomplete="off" />
             </div>
-            <select id="roots-limit" class="select" aria-label="会话归并条数">
-              <option value="5" selected>5 条</option>
-              <option value="10">10 条</option>
-              <option value="20">20 条</option>
-              <option value="0">全部</option>
-            </select>
           </div>
         </div>
         <div class="table-scroll">
@@ -444,6 +438,27 @@
               <tr class="loading-row"><td colspan="7">加载中…</td></tr>
             </tbody>
           </table>
+        </div>
+        <div class="table-pager" id="roots-pager" hidden>
+          <span id="roots-page-info"></span>
+          <div class="table-pager-btns">
+            <span class="table-pager-nav" id="roots-page-nav">
+              <button type="button" class="btn ghost" id="roots-prev">上一页</button>
+              <span class="table-pager-nums" id="roots-page-nums"></span>
+              <button type="button" class="btn ghost" id="roots-next">下一页</button>
+            </span>
+            <select id="roots-limit" class="select" aria-label="会话归并每页条数">
+              <option value="10" selected>10 条/页</option>
+              <option value="20">20 条/页</option>
+              <option value="50">50 条/页</option>
+              <option value="0">全部</option>
+            </select>
+            <label class="page-jump" id="roots-jump">
+              跳至
+              <input type="text" id="roots-page-jump" inputmode="numeric" autocomplete="off" aria-label="跳转到页码" />
+              页
+            </label>
+          </div>
         </div>
         <div class="table-empty" id="roots-empty" hidden>没有匹配的会话</div>
       </section>
