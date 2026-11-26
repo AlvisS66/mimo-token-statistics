@@ -1743,7 +1743,14 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   min-width: 0;
 }
 .drawer-model-top .n {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-weight: 600;
+  min-width: 0;
+}
+.drawer-model-top .n .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1843,6 +1850,46 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   display: block;
   height: 100%;
   min-width: 0;
+}
+.turn-item .t-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.turn-item .t-head .t-model { flex: 0 1 auto; }
+.t-chip {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t-chip-prov {
+  font-family: var(--mono);
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  border-color: color-mix(in srgb, var(--blue) 30%, transparent);
+}
+.t-chip-effort {
+  color: var(--violet);
+  background: color-mix(in srgb, var(--violet) 12%, transparent);
+  border-color: color-mix(in srgb, var(--violet) 30%, transparent);
+}
+.t-chip-effort.is-default {
+  color: var(--text-3);
+  background: transparent;
+  border-color: var(--border-subtle);
+  font-weight: 500;
 }
 
 @keyframes fadeIn {
@@ -2126,6 +2173,7 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
     word-break: break-word;
   }
   .turn-legend { font-size: 11px; gap: 6px 10px; }
+  .t-chip { font-size: 10px; padding: 1px 6px; }
 
   .settings-modal { width: calc(100vw - 12px); }
   .settings-form input[type="password"] { height: 38px; font-size: 16px; }

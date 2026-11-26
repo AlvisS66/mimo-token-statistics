@@ -119,6 +119,9 @@
     rootsTotal: 0,
     rootsReqId: 0,
     roots: null,
+    drawerTurns: [],
+    drawerShown: 0,
+    drawerTurnTotal: 0,
   };
 
   function persistOpenRanks() {
@@ -2058,6 +2061,117 @@
   }
 
   // ── drawer ────────────────────────────────────────────────
+  const DRAWER_TURN_BATCH = 50;
+  const TURN_LEGEND = `
+          <div class="turn-legend">
+            <span class="leg"><i class="sw" style="background:var(--blue)"></i>入</span>
+            <span class="leg"><i class="sw" style="background:var(--violet)"></i>出</span>
+            <span class="leg"><i class="sw" style="background:var(--cyan)"></i>缓存</span>
+          </div>`;
+
+  function drawerScroller() {
+    return $("#drawer .modal-body");
+  }
+
+  function drawerTurnsHint() {
+    const hint = $("#drawer-turns-hint");
+    if (!hint) return;
+    const total = state.drawerTurnTotal;
+    if (!total) {
+      hint.textContent = "";
+      return;
+    }
+    hint.textContent =
+      state.drawerShown >= total
+        ? `共 ${exact(total)} 条`
+        : `已显示 ${exact(state.drawerShown)} / ${exact(total)} 条`;
+  }
+
+  function turnCardHtml(t) {
+    const cache = (t.cache_read || 0) + (t.cache_write || 0);
+    const sum = (t.total || 1) || 1;
+    const pIn = ((t.input || 0) / sum) * 100;
+    const pOut = (((t.output || 0) + (t.reasoning || 0)) / sum) * 100;
+    const pCache = (cache / sum) * 100;
+    const cr = t.cache_read || 0;
+    const cw = t.cache_write || 0;
+    const hit = cr + cw + (t.input || 0) > 0 ? Math.round((cr / (cr + cw + (t.input || 0))) * 100) : 0;
+    const provider = t.provider || "";
+    const variant = t.variant || "";
+    // 服务商 / 思考强度与模型名同行；老数据两项都没有就只显示模型名
+    const chips =
+      (provider
+        ? `<span class="t-chip t-chip-prov" title="服务商 ${escapeHtml(provider)}">${escapeHtml(provider)}</span>`
+        : "") +
+      (variant
+        ? `<span class="t-chip t-chip-effort" title="思考强度 ${escapeHtml(variant)}">思考 ${escapeHtml(variant)}</span>`
+        : provider
+          ? `<span class="t-chip t-chip-effort is-default" title="这条请求没有记录思考强度">思考 默认</span>`
+          : "");
+    return `
+          <div class="turn-item">
+            <div class="t-head">
+              <span class="t-model" title="${escapeHtml(t.model)}">${escapeHtml(t.model)}</span>${chips}
+            </div>
+            <div class="t-tok">${formatTok(t.total)} · 命中 ${hit}%</div>
+            <div class="t-bar" title="入/出/缓存 ${formatTok(t.input)} / ${formatTok(t.output)} / ${formatTok(cache)}">
+              <i style="width:${pIn}%;background:var(--blue)"></i>
+              <i style="width:${pOut}%;background:var(--violet)"></i>
+              <i style="width:${pCache}%;background:var(--cyan)"></i>
+            </div>
+            <div class="t-io">入/出/缓存 ${formatTok(t.input)} / ${formatTok(t.output)} / ${formatTok(cache)}</div>
+            <div class="t-time">${escapeHtml(t.time_label)}</div>
+          </div>`;
+  }
+
+  // 只往末尾追加新卡片：重写 innerHTML 会让滚动位置跳、已渲染的卡片重排
+  function appendDrawerTurns(count) {
+    const box = $("#drawer-turns");
+    if (!box) return false;
+    const from = state.drawerShown;
+    const to = Math.min(state.drawerTurns.length, from + count);
+    if (to <= from) return false;
+    box.insertAdjacentHTML("beforeend", state.drawerTurns.slice(from, to).map(turnCardHtml).join(""));
+    state.drawerShown = to;
+    drawerTurnsHint();
+    return true;
+  }
+
+  // 一批装不满一屏就继续追加，否则永远滚不到底
+  function fillDrawerViewport() {
+    const scroller = drawerScroller();
+    if (!scroller) return;
+    for (let i = 0; i < 40; i++) {
+      if (state.drawerShown >= state.drawerTurns.length) return;
+      if (scroller.scrollHeight > scroller.clientHeight + 8) return;
+      if (!appendDrawerTurns(DRAWER_TURN_BATCH)) return;
+    }
+  }
+
+  function renderDrawerTurns(reset) {
+    const box = $("#drawer-turns");
+    if (!box) return;
+    if (!state.drawerTurns.length) {
+      box.innerHTML = `<div class="turn-item"><div class="t-model">无请求记录</div></div>`;
+      state.drawerShown = 0;
+      drawerTurnsHint();
+      return;
+    }
+    if (reset) {
+      box.innerHTML = TURN_LEGEND; // 图例只插一次
+      state.drawerShown = 0;
+    }
+    appendDrawerTurns(DRAWER_TURN_BATCH);
+    fillDrawerViewport();
+  }
+
+  function onDrawerTurnsScroll(e) {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240) {
+      if (appendDrawerTurns(DRAWER_TURN_BATCH)) fillDrawerViewport();
+    }
+  }
+
   async function openDrawer(id) {
     if (!id) return;
     const drawer = $("#drawer");
@@ -2117,10 +2231,16 @@
           ms
             .map((m, i) => {
               const color = MODEL_COLORS[i % MODEL_COLORS.length];
+              const provs = (m.providers || [])
+                .map(
+                  (p) =>
+                    `<span class="t-chip t-chip-prov" title="服务商 ${escapeHtml(p)}">${escapeHtml(p)}</span>`
+                )
+                .join("");
               return `
               <div class="drawer-model-row" data-model="${escapeHtml(m.model)}" data-tokens="${m.tokens}" data-share="${m.share}" data-turns="${m.turns || 0}" data-input="${m.input || 0}" data-output="${m.output || 0}" data-cache="${m.cache || 0}" data-cache-hit="${m.cache_hit || 0}">
                 <div class="drawer-model-top">
-                  <span class="n">${escapeHtml(m.model)}</span>
+                  <span class="n"><span class="nm">${escapeHtml(m.model)}</span>${provs}</span>
                   <span class="v">${m.fmt} · ${m.share}% · ${m.avg_fmt || "—"} · 命中 ${m.cache_hit ?? 0}%</span>
                 </div>
                 <div class="drawer-model-bar"><i style="width:${Math.min(100, Math.max(m.share > 0 ? 2 : 0, m.share || 0))}%;background:${color}"></i></div>
@@ -2131,42 +2251,10 @@
       }
       if (turns) {
         const all = d.turns || [];
-        const hint = $("#drawer-turns-hint");
-        const totalTurns = d.totals?.turns || all.length;
-        if (hint) hint.textContent = all.length ? `显示最近 ${Math.min(50, all.length)} / ${exact(totalTurns)} 条` : "";
-        const rows = all.slice().reverse().slice(0, 50);
-        const legend = `
-          <div class="turn-legend">
-            <span class="leg"><i class="sw" style="background:var(--blue)"></i>入</span>
-            <span class="leg"><i class="sw" style="background:var(--violet)"></i>出</span>
-            <span class="leg"><i class="sw" style="background:var(--cyan)"></i>缓存</span>
-          </div>`;
-        turns.innerHTML =
-          legend +
-          (rows
-            .map((t) => {
-              const cache = (t.cache_read || 0) + (t.cache_write || 0);
-              const sum = (t.total || 1) || 1;
-              const pIn = ((t.input || 0) / sum) * 100;
-              const pOut = (((t.output || 0) + (t.reasoning || 0)) / sum) * 100;
-              const pCache = (cache / sum) * 100;
-              const cr = t.cache_read || 0;
-              const cw = t.cache_write || 0;
-              const hit = cr + cw + (t.input || 0) > 0 ? Math.round((cr / (cr + cw + (t.input || 0))) * 100) : 0;
-              return `
-          <div class="turn-item">
-            <div class="t-model">${escapeHtml(t.model)}</div>
-            <div class="t-tok">${formatTok(t.total)} · 命中 ${hit}%</div>
-            <div class="t-bar" title="入/出/缓存 ${formatTok(t.input)} / ${formatTok(t.output)} / ${formatTok(cache)}">
-              <i style="width:${pIn}%;background:var(--blue)"></i>
-              <i style="width:${pOut}%;background:var(--violet)"></i>
-              <i style="width:${pCache}%;background:var(--cyan)"></i>
-            </div>
-            <div class="t-io">入/出/缓存 ${formatTok(t.input)} / ${formatTok(t.output)} / ${formatTok(cache)}</div>
-            <div class="t-time">${escapeHtml(t.time_label)}</div>
-          </div>`;
-            })
-            .join("") || `<div class="turn-item"><div class="t-model">无请求记录</div></div>`);
+        state.drawerTurns = all.slice().reverse(); // 最新在上
+        state.drawerTurnTotal = Number(d.totals?.turns || all.length);
+        state.drawerShown = 0;
+        renderDrawerTurns(true);
       }
     } catch (err) {
       if (turns) turns.innerHTML = `<div class="turn-item"><div class="t-model">加载失败：${escapeHtml(err.message)}</div></div>`;
@@ -2487,6 +2575,7 @@
     $("#live-pill")?.addEventListener("click", toggleAutoRefresh);
     $("#drawer-close")?.addEventListener("click", closeDrawer);
     $("#drawer-backdrop")?.addEventListener("click", closeDrawer);
+    drawerScroller()?.addEventListener("scroll", onDrawerTurnsScroll, { passive: true });
     // 遮罩上的滚轮/触摸不带动底层页面
     const backdrop = $("#drawer-backdrop");
     const blockScroll = (e) => {

@@ -272,6 +272,66 @@ class SessionDetailTurnTest(FixtureMixin, unittest.TestCase):
         self.assertIsNone(turns[self.t_recent - 2000]["provider"])
         self.assertIsNone(turns[self.t_recent - 2000]["variant"])
 
+    def test_every_turn_is_returned(self):
+        """旧实现只回最近 200 条 ⇒ 抽屉滚到底也只有 200 条，提示永远停在 200 / N。"""
+        big = "ses_big"
+        conn = sqlite3.connect(server.MIMO_DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (big, "proj-1", None, "/proj/a", "Big one", self.t_recent, self.t_recent),
+            )
+            conn.executemany(
+                "INSERT INTO message VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        f"b{i:04d}",
+                        big,
+                        "main",
+                        self.t_recent + i * 1000,
+                        self.t_recent + i * 1000,
+                        _assistant(self.t_recent + i * 1000, 100, 10, 90),
+                    )
+                    for i in range(210)
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._reset_server_cache()
+        detail = server.session_detail(big)
+        self.assertEqual(detail["totals"]["turns"], 210)
+        self.assertEqual(len(detail["turns"]), 210)
+        self.assertEqual(detail["turns"][0]["time"], self.t_recent)
+        self.assertEqual(detail["turns"][-1]["time"], self.t_recent + 209 * 1000)
+
+    def test_model_rows_carry_providers(self):
+        """模型分布每行要知道这个模型走过哪些服务商，按条数降序；没有服务商的请求不占位。"""
+        sid = "ses_prov"
+        conn = sqlite3.connect(server.MIMO_DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (sid, "proj-1", None, "/proj/a", "Providers", self.t_recent, self.t_recent),
+            )
+            rows = [
+                ("p01", self.t_recent + 1000, _assistant(self.t_recent + 1000, 10, 1, 0, provider="p-b")),
+                ("p02", self.t_recent + 2000, _assistant(self.t_recent + 2000, 10, 1, 0, provider="p-a")),
+                ("p03", self.t_recent + 3000, _assistant(self.t_recent + 3000, 10, 1, 0, provider="p-a")),
+                ("p04", self.t_recent + 4000, _assistant(self.t_recent + 4000, 10, 1, 0)),
+            ]
+            conn.executemany(
+                "INSERT INTO message VALUES (?, ?, ?, ?, ?, ?)",
+                [(mid, sid, "main", tc, tc, data) for mid, tc, data in rows],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._reset_server_cache()
+        models = server.session_detail(sid)["models"]
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0]["providers"], ["p-a", "p-b"])
+
 
 class RangeWindowTest(FixtureMixin, unittest.TestCase):
     def test_all_is_zero(self):

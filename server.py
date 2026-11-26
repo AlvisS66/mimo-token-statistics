@@ -1568,6 +1568,7 @@ def session_detail(session_id: str) -> Dict[str, Any]:
     models: Dict[str, Dict[str, int]] = defaultdict(lambda: {
         "tokens": 0, "turns": 0, "input": 0, "output": 0, "reasoning": 0, "cache_read": 0, "cache_write": 0,
     })
+    model_providers: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for raw, tcreated in rows:
         parsed = parse_tokens(raw["data"] if isinstance(raw, sqlite3.Row) else raw)
@@ -1589,6 +1590,8 @@ def session_detail(session_id: str) -> Dict[str, Any]:
         st["reasoning"] += parsed["reasoning"]
         st["cache_read"] += parsed["cache_read"]
         st["cache_write"] += parsed["cache_write"]
+        if parsed.get("provider"):
+            model_providers[parsed["model"]][parsed["provider"]] += 1
         turns.append(
             {
                 "time": tc,
@@ -1614,10 +1617,16 @@ def session_detail(session_id: str) -> Dict[str, Any]:
             "cache_hit": cache_hit_rate(totals["cache_read"], totals["cache_write"], totals["input"]),
         },
         "models": [
-            pack_mstat(mid, st, totals["tokens"])
+            {
+                **pack_mstat(mid, st, totals["tokens"]),
+                "providers": [
+                    name
+                    for name, _ in sorted(model_providers[mid].items(), key=lambda x: (-x[1], x[0]))
+                ],
+            }
             for mid, st in sorted(models.items(), key=lambda x: -x[1]["tokens"])
         ],
-        "turns": turns[-200:],
+        "turns": turns,
     }
     cache_set(cache_key, result)
     return result
