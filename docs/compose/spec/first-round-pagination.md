@@ -1,6 +1,6 @@
 ---
 feature: first-round-pagination
-status: in-progress
+status: delivered
 updated: 2026-11-26
 source: feat/first-round-pagination
 ---
@@ -8,7 +8,10 @@ source: feat/first-round-pagination
 # 首轮明细前端分页
 
 ## Report
-[Not finalized yet]
+
+**What was built** — 首轮明细表的条数下拉从「只显示前 N 名」改为「每页条数」（10 / 20 / 50，「全部」仍一次画完）；表格下方新增翻页控件：`共 N 条 · 第 x / y 页`、上一页 / 下一页、antd 形态的页码按钮（当前页附近 5 个 + 首末页、缺口省略号、当前页高亮）与「跳至 [ ] 页」回车跳转。只渲染当前页的行；口径（时间范围 / 选中日期 / agent / 分桶 / 搜索词 / 页大小）变化回第 1 页，刷新与 15 秒自动刷新保留页码，行数变少时收到最后一页。纯前端：不改接口、不升版本串，发布说明并入 v1.0.3。
+
+**Verification** — `python -m unittest discover -s tests -v` → 44 tests OK（2.0 s）；`python -m py_compile server.py` → OK；`node --check js/app.js` → OK。有头浏览器场景（Playwright，临时服务 `127.0.0.1:8798` 服务本 worktree，`range=all` 1,102–1,104 条首轮）：每页 10 条只渲染 10 行、控件「共 N 条 · 第 1 / 111 页」；第 2 页与第 1 页无重复行；末页 18/18、余 7 行（= 177 − 17×10）；「全部」全量且行序与改动前一致；跳 57 = 第 561–570 行并显示 `1 … 55 56 57 58 59 … 111`，跳 100 显示 `1 … 98 99 100 101 102 … 111`，跳 999 → 第 111 页、跳 0 → 第 1 页、`abc` 清空且不动；六类筛选变化均回第 1 页、刷新留在第 2 页；键盘 Tab + Enter 可翻页且焦点保持在当前页；0 console error、0 page error。独立评审（`general-3`）：PASS，无 critical，两条 nit 已在 `b0e1450` 修复并复验。
 
 ## [S1] Problem
 
