@@ -203,15 +203,30 @@
                 <option value="cache">按缓存</option>
                 <option value="hit">按命中率</option>
               </select>
-              <select id="project-limit" class="select" aria-label="项目显示条数">
-                <option value="5" selected>5 条</option>
-                <option value="10">10 条</option>
-                <option value="20">20 条</option>
-                <option value="0">全部</option>
-              </select>
             </div>
           </div>
           <div id="project-list" class="rank-list expandable"></div>
+          <div class="table-pager" id="project-pager" hidden>
+            <span id="project-page-info"></span>
+            <div class="table-pager-btns">
+              <span class="table-pager-nav" id="project-page-nav">
+                <button type="button" class="btn ghost" id="project-prev">上一页</button>
+                <span class="table-pager-nums" id="project-page-nums"></span>
+                <button type="button" class="btn ghost" id="project-next">下一页</button>
+              </span>
+              <select id="project-limit" class="select" aria-label="项目榜每页条数">
+                <option value="10" selected>10 条/页</option>
+                <option value="20">20 条/页</option>
+                <option value="50">50 条/页</option>
+                <option value="0">全部</option>
+              </select>
+              <label class="page-jump" id="project-jump">
+                跳至
+                <input type="text" id="project-page-jump" inputmode="numeric" autocomplete="off" aria-label="跳转到页码" />
+                页
+              </label>
+            </div>
+          </div>
         </article>
       </section>
 

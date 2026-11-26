@@ -79,7 +79,11 @@
     sessionsTotal: 0,
     sessionsReqId: 0,
     modelLimit: Number(localStorage.getItem("mimo-ts-model-limit") || 5),
-    projectLimit: Number(localStorage.getItem("mimo-ts-project-limit") || 5),
+    projectLimit: readPageSize("mimo-ts-project-limit"),
+    projectPage: 1,
+    projectPageKey: "",
+    projectsTotal: 0,
+    projectsReqId: 0,
     modelSort: localStorage.getItem("mimo-ts-model-sort") || "tokens",
     projectSort: localStorage.getItem("mimo-ts-project-sort") || "tokens",
     theme: readFollowSystem() ? systemTheme() : (localStorage.getItem("mimo-ts-theme") || systemTheme()),
@@ -273,8 +277,9 @@
     if (btn) btn.disabled = true;
     try {
       syncSessionsPageKey();
+      syncProjectsPageKey();
       const data = await fetchJSON(
-        `/api/overview?range=${encodeURIComponent(state.range)}&${sessionQuery()}`
+        `/api/overview?range=${encodeURIComponent(state.range)}&${rankQuery()}`
       );
       state.data = data;
       if (data.ok) {
@@ -390,7 +395,7 @@
       const hsub0 = $("#hourly-sub");
       if (hsub0) hsub0.textContent = `${data.range_label || ""} · 按小时`;
       renderModels(data.by_model || []);
-      renderProjects(data.by_project || []);
+      applyProjectsPage(data);
       populateModelFilter(data);
       applySessionsPage(data);
       const msub0 = $("#models-sub");
@@ -664,7 +669,7 @@
     const data = state.data;
     if (!data) return;
     renderModels(data.by_model || []);
-    renderProjects(data.by_project || []);
+    applyProjectsPage(data);
     populateModelFilter(data);
     applySessionsPage(data);
     const msub = $("#models-sub");
@@ -678,7 +683,7 @@
   function applySelectedDayRanks(d) {
     const label = selectionLabel(state.selectedDayDates);
     renderModels(d.by_model || []);
-    renderProjects(d.by_project || []);
+    applyProjectsPage(d);
     populateModelFilter({ by_model: d.by_model || [], by_project: d.by_project || [], project_names: d.project_names });
     applySessionsPage(d);
     const msub = $("#models-sub");
@@ -702,9 +707,10 @@
     const reqId = ++state.hourlyReqId;
     loadDimensions();
     syncSessionsPageKey();
+    syncProjectsPageKey();
     try {
       const d = await fetchJSON(
-        `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${sessionQuery()}`
+        `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${rankQuery()}`
       );
       if (reqId !== state.hourlyReqId || JSON.stringify(state.selectedDayDates) !== JSON.stringify(dates)) return;
       if (!d.ok) return;
@@ -1247,14 +1253,20 @@
     const el = $("#project-list");
     if (!el) return;
     state.rankProjects = projects;
+    const total = state.projectsTotal;
+    const size = state.projectLimit;
+    const pages = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+    if (state.projectPage > pages) {
+      state.projectPage = pages;
+      reloadProjects();
+      return;
+    }
+    renderPager("project", total, state.projectPage, pages);
     if (!projects.length) {
       el.innerHTML = `<div style="color:var(--text-3);font-size:12px;padding:16px 0">暂无数据</div>`;
       return;
     }
-    const sorted = sortRankItems(projects, state.projectSort);
-    const limit = state.projectLimit > 0 ? state.projectLimit : sorted.length;
-    el.innerHTML = sorted
-      .slice(0, limit)
+    el.innerHTML = projects
       .map((p) => {
         const open = state.openProject === p.name;
         return rankRow({
@@ -1432,6 +1444,52 @@
     state.sessions = data.by_session || [];
     state.sessionsTotal = Number(data.sessions_total || 0);
     renderSessions();
+  }
+
+  // ── 项目榜（服务端分页） ──────────────────────────────────
+  function projectPageKey() {
+    return [state.range, state.selectedDayDates.join(","), state.projectSort, state.projectLimit].join("|");
+  }
+
+  function syncProjectsPageKey() {
+    const key = projectPageKey();
+    if (key !== state.projectPageKey) {
+      state.projectPageKey = key;
+      state.projectPage = 1;
+    }
+  }
+
+  function projectQuery() {
+    const size = state.projectLimit;
+    return new URLSearchParams({
+      project_limit: String(size),
+      project_offset: String(size > 0 ? Math.max(0, state.projectPage - 1) * size : 0),
+      project_sort: state.projectSort || "tokens",
+    }).toString();
+  }
+
+  function applyProjectsPage(data) {
+    state.projectsTotal = Number(data.projects_total || 0);
+    renderProjects(data.by_project || []);
+  }
+
+  async function reloadProjects() {
+    syncProjectsPageKey();
+    const reqId = ++state.projectsReqId;
+    const dates = state.selectedDayDates;
+    const url = dates.length
+      ? `/api/days-hourly?dates=${encodeURIComponent(dates.join(","))}&${projectQuery()}`
+      : `/api/overview?range=${encodeURIComponent(state.range)}&${projectQuery()}`;
+    try {
+      const data = await fetchJSON(url);
+      if (reqId !== state.projectsReqId) return;
+      if (data.ok) applyProjectsPage(data);
+    } catch (_) {}
+  }
+
+  // 整页刷新时两张表一起取，参数拼在同一个请求上
+  function rankQuery() {
+    return `${sessionQuery()}&${projectQuery()}`;
   }
 
   async function reloadSessions() {
@@ -2425,16 +2483,23 @@
       renderModels(state.data?.by_model || []);
     });
 
-    $("#project-limit")?.addEventListener("change", (e) => {
-      state.projectLimit = Number(e.target.value) || 0;
-      localStorage.setItem("mimo-ts-project-limit", String(state.projectLimit));
-      renderProjects(state.data?.by_project || []);
-    });
-
     $("#project-sort")?.addEventListener("change", (e) => {
       state.projectSort = e.target.value;
       localStorage.setItem("mimo-ts-project-sort", state.projectSort);
-      renderProjects(state.data?.by_project || []);
+      reloadProjects();
+    });
+
+    bindPager("project", {
+      getPage: () => state.projectPage,
+      go: (page) => {
+        state.projectPage = page;
+        reloadProjects();
+      },
+      setSize: (value) => {
+        state.projectLimit = value;
+        localStorage.setItem("mimo-ts-project-limit", String(state.projectLimit));
+        reloadProjects();
+      },
     });
 
     // ── 新维度控件 ──
