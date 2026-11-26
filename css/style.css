@@ -1402,13 +1402,36 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
   color: var(--text-2);
   font-size: 12px;
 }
-.table-pager-btns { display: flex; gap: 6px; }
+.table-pager-btns { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .table-pager .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+.table-pager-nums { display: flex; align-items: center; gap: 4px; }
+.table-pager .page-num {
+  min-width: 28px;
+  padding: 0 6px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+.table-pager .page-num.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.page-gap { color: var(--text-3); padding: 0 2px; letter-spacing: 1px; }
+.page-jump { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--text-2); }
+.page-jump input {
+  width: 46px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+.page-jump input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .data-table {
   width: 100%;
   border-collapse: collapse;

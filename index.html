@@ -367,7 +367,13 @@
           <span id="firstround-page-info"></span>
           <div class="table-pager-btns">
             <button type="button" class="btn ghost" id="firstround-prev">上一页</button>
+            <span class="table-pager-nums" id="firstround-page-nums"></span>
             <button type="button" class="btn ghost" id="firstround-next">下一页</button>
+            <label class="page-jump">
+              跳至
+              <input type="text" id="firstround-page-jump" inputmode="numeric" autocomplete="off" aria-label="跳转到页码" />
+              页
+            </label>
           </div>
         </div>
         <div class="table-empty" id="firstround-empty" hidden>没有匹配的首轮</div>

@@ -1746,6 +1746,37 @@
     $("#firstround-page-info").textContent = `共 ${exact(total)} 条 · 第 ${state.frPage} / ${pages} 页`;
     $("#firstround-prev").disabled = state.frPage <= 1;
     $("#firstround-next").disabled = state.frPage >= pages;
+    renderPageNums(pages);
+  }
+
+  // 页码按钮：页数多时按 antd 的窗口规则（当前页附近 5 个 + 首末页，缺口用省略号）
+  function renderPageNums(pages) {
+    const box = $("#firstround-page-nums");
+    if (!box) return;
+    const cur = state.frPage;
+    const nums = [];
+    if (pages <= 7) {
+      for (let i = 1; i <= pages; i++) nums.push(i);
+    } else if (cur <= 5) {
+      for (let i = 1; i <= 5; i++) nums.push(i);
+      nums.push(pages);
+    } else if (cur >= pages - 4) {
+      nums.push(1);
+      for (let i = pages - 4; i <= pages; i++) nums.push(i);
+    } else {
+      nums.push(1);
+      for (let i = cur - 2; i <= cur + 2; i++) nums.push(i);
+      nums.push(pages);
+    }
+    let prev = 0;
+    box.innerHTML = nums
+      .map((n) => {
+        const gap = prev && n - prev > 1 ? `<span class="page-gap" aria-hidden="true">…</span>` : "";
+        const active = n === cur;
+        prev = n;
+        return `${gap}<button type="button" class="btn ghost page-num${active ? " active" : ""}" data-page="${n}"${active ? ' aria-current="page"' : ""}>${n}</button>`;
+      })
+      .join("");
   }
 
   function renderRoots() {
@@ -2354,6 +2385,24 @@
     });
     $("#firstround-next")?.addEventListener("click", () => {
       state.frPage += 1;
+      renderFirstRoundTable();
+    });
+
+    $("#firstround-page-nums")?.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-page]");
+      if (!btn) return;
+      state.frPage = Number(btn.dataset.page);
+      renderFirstRoundTable();
+    });
+
+    $("#firstround-page-jump")?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const n = Number.parseInt(e.target.value, 10);
+      e.target.value = "";
+      if (!Number.isFinite(n)) return;
+      // 上限交给渲染时的 clamp（越界收到最后一页）
+      state.frPage = Math.max(1, n);
       renderFirstRoundTable();
     });
 
