@@ -1,6 +1,6 @@
 ---
 feature: table-pagination
-status: in-progress
+status: delivered
 updated: 2026-11-26
 source: feat/table-pagination
 ---
@@ -9,7 +9,11 @@ source: feat/table-pagination
 
 ## Report
 
-[Not finalized yet]
+**What was built** — 会话用量、项目榜、会话归并三张榜单从「服务端静默截断 + 前端本地过滤」改成**服务端 `limit` / `offset` 真分页**：`aggregate()` / `aggregate_dates_ranks()` / `sessions_by_root()` 的缓存里存**全量行**（`[:50]` / `[:30]` / `[:100]` 三处 5 点截断全删），HTTP 处理器再按查询参数做过滤 → 排序 → 切片，并补 `sessions_total` / `projects_total` / `project_names` / `total`。参数带前缀（一个响应两张表）：`session_limit/offset/q/project/model/sort`、`project_limit/offset/sort`、归并裸 `limit/offset/q/sort`；缺省 50 / 30 / 100 保持旧行数，`0` 表示不分页，坏 `limit`/`offset` 回 400 `bad <参数名>`，`offset` 越界给空数组 + 真实总数，未知 `sort` 回落默认键。排序统一「主键降序 → `tokens` 降序 → `id` 升序」，`pct` 仍在聚合层按全量算（翻页条宽不跳）。项目榜分页带出 `project_names`（分页前的全量项目名），因为会话面板的项目筛选下拉原本吃 `by_project`。前端把翻页控件抽成通用件（`pagerEls` / `renderPager` / `renderPageNums` / `bindPager`），四张表共用同一套 DOM 与文案（`共 N 条 · 第 x / y 页` + 上一页 / 页码 / 下一页 + `N 条/页` + 跳至），每张表一份页码 + 口径签名（签名变回第 1 页，越界 clamp 后重新请求），并删掉会话表的「显示更多（还有 N 条）」。接口新增参数与字段 ⇒ 版本串升 `MiMoTokenStats/1.0.4` + `RELEASE_NOTES_v1.0.4.md` + README API 表补参数与总数字段。
+
+**Verification** — `python -m unittest discover -s tests` → **65 tests OK**（12.9 s；分页轮新增 18 条，加复审后补的排序生效 / 报错文案 / 先过滤再切片共 5 条断言）；`node --check js/app.js` → OK。有头浏览器场景（Playwright，临时服务 `127.0.0.1:8798` 服务本 worktree，真实库）五套全绿、0 console error：① 首轮明细回归 1,132 条 / 114 页，控件顺序与文案不变、「全部」仍显示选择器、跳 57 显示 `1 … 55 56 57 58 59 … 114`、坏输入清空、焦点回到当前页；② 会话表 872 条 / 88 页，每页 10 行、页间无重复、末页行数 = 总数 − 86×10、改排序回第 1 页且首页行序变化、搜索 `token` 命中 24 条、项目筛选每行同项目、`20 条/页` = 20 行、「全部」872 行且只藏翻页按钮、选中日期模式 29 条 / 3 页；③ 项目榜 19 个 / 2 页、改排序顺序变、展开态跨页保留；④ 归并表 356 个根会话 / 36 页、搜索回 128 条、空结果走空状态、键盘翻页；⑤ 修复项回归（关日详情回第 1 页、延迟响不覆盖新表、筛选被清空后自动补请求）。反向验证：`fixes-a/b/c` 与 `guards-d/e` 五段场景在修好前的 `js/app.js` 上逐条变红（`19` vs `28`、`66` vs `517`、只 1 条请求、`1` vs `356`），修后全绿。真实库接口实测：`/api/overview?range=all` 冷 1.9 s / 热 10–14 ms，`session_limit=10` 10 ms、`offset=850` 11 ms、`sessions-root?limit=10` 47 ms，缺省仍 50 会话 / 19 项目。两轮独立评审（全新 subagent，只读）：**均无 critical**，第一轮 3 条 major + 13 条 nit、第二轮 2 条 major + 7 条 nit 已按「自己写出的瑕疵直接修、取舍记录」处置，全部修复都有红/绿两头的证据。
+
+**Note** — 这轮改了 `server.py`（新增参数、字段与 5 处截断），**合并后必须重启 8765 端口的服务**才生效；静态文件按请求读盘，前端刷新即生效。
 
 ## [S1] Problem
 
