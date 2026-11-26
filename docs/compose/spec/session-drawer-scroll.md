@@ -42,8 +42,8 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 ```
 
 - 模型名保持原样（`.t-model`，已有省略规则）；模型名与两个 chip 包在 `.t-head` 里（`display:flex; gap:6px; min-width:0; flex-wrap:wrap`），窄屏真放不下时 chip 折到下一行，不横向溢出。
-- 服务商 chip（`.t-chip.t-chip-prov`）：`color: var(--blue)`、`font-family: var(--mono)`、底色与边框用 `color-mix(in srgb, var(--blue) 12%/30%, transparent)`，`border-radius: 999px`、`padding: 1px 7px`、`font-size: 10.5px`，`title="服务商 kg-newapi"`。
-- 思考强度 chip（`.t-chip.t-chip-effort`）：同款形态，颜色换成 `var(--violet)` 的 12% / 30%，文案 `思考 <variant>`（原值照搬，可能是 `max` / `xhigh` / `high` / `medium`），`title="思考强度 <variant>"`；`variant` 缺失时文案 `思考 默认`，改用中性样式（`color: var(--text-3)`、透明底、`border-color: var(--border-subtle)`），不冒充 `max`。
+- 服务商 chip（`.t-chip.t-chip-prov`）：`color: var(--blue)`、`font-family: var(--mono)`、底色与边框用 `color-mix(in srgb, var(--blue) 12%/30%, transparent)`，`border-radius: 999px`、`padding: 1px 7px`、`font-size: 10.5px`（≤560 px 时收到 `1px 6px` / `10px`），`title="服务商 kg-newapi"`。
+- 思考强度 chip（`.t-chip.t-chip-effort`）：同款形态，颜色换成 `var(--violet)` 的 12% / 30%，文案 `思考 <variant>`（原值照搬，可能是 `max` / `xhigh` / `high` / `medium`），`title="思考强度 <variant>"`；`variant` 缺失但有服务商时文案 `思考 默认`（两者都缺就只有模型名，见下一条），改用中性样式（`color: var(--text-3)`、透明底、`border-color: var(--border-subtle)`），不冒充 `max`。
 - 两项都缺失（老数据）时这一行只有模型名（不渲染空 chip）。
 - 深色 / 浅色两套主题都要可读（用已有变量与固定 alpha，不新造颜色变量）。
 
@@ -54,8 +54,7 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 追加只拼接新卡片（`insertAdjacentHTML`），**不重写已渲染节点**——避免滚动位置跳动，也避免每追加一批就重排全部卡片。
 - 追加后若容器仍不可滚动（内容不足一屏）且还有剩余，继续追加，直到可滚动或加载完（防「永远触不到底」）。
 - 顶部提示从 `显示最近 50 / N 条` 改成 `已显示 50 / 1,268 条`，每次追加更新；全部加载完改成 `共 1,268 条`。图例（入/出/缓存）只在首次渲染时插入一次。
-- 打开抽屉时（**发请求之前**）就把 `drawerTurns` / `drawerShown` / 计数提示归零，失败态也不留上一个会话的计数；总数取「手里实际有多少条」（`turns.length`），服务端将来若再截断，提示不会停在到不了的数字。
-- 打开抽屉时重置 `drawerTurns` / `drawerShown`；滚动监听从初始化时就绑在 `.modal-body` 上（元素不重建，不必每次打开再绑）。关闭抽屉让在途的 `/api/session` 响应作废（`state.drawerReqId`）——否则关掉 A 再开 B 之后，A 的迟到响应会把 B 的标题、模型分布和请求列表整个换掉。
+- 打开抽屉时（**发请求之前**）就把 `drawerTurns` / `drawerShown` 归零并清掉计数提示，失败态也不留上一个会话的计数；总数直接取「手里实际有多少条」（`turns.length`），服务端将来若再截断，提示不会停在到不了的数字。滚动监听从初始化时就绑在 `.modal-body` 上（元素不重建，不必每次打开再绑）。关闭抽屉让在途的 `/api/session` 响应作废（`state.drawerReqId`）——否则关掉 A 再开 B 之后，A 的迟到响应会把 B 的标题、模型分布和请求列表整个换掉。
 - 空态与失败态文案不变。
 
 ### S2.4 模型分布也要显示服务商（2026-11-26 用户追加）
@@ -101,3 +100,4 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 2026-11-26 T6（用户截图追加「模型用量这里也要加上服务商」）：`aggregate()` 与 `aggregate_dates_ranks()` 各补一份 `model_providers`，`by_model[]` 加 `providers`（抽了 `provider_list()` 与抽屉共用排序规则）；前端 `rankRow()` 加可选 `chips`，只有模型榜传。7 天 / 30 天 / 选中日期三种口径的有头实测都带服务商且 chip 与模型名中线偏差 0 px，项目榜 `#project-list .t-chip` 计数 0（未受影响），390 px 宽四行均无溢出。
 - 2026-11-26 服务端侧独立评审 PASS WITH NITS：排序用例原先的期望值与「纯字典序」同构（把 `provider_list` 改成 `sorted(counts)` 仍全绿）⇒ 换成「`p-z` 出现 2 次 + `p-a` 1 次」的数据，断言 `[:2] == ["p-z", "p-a"]`，再把 helper 换回字典序即可复现 `['p-a','p-z']` 的失败；另把 spec 里「`variant` 只有 max」的错话按实库分布改正。
 - 2026-11-26 前端侧独立评审 PASS WITH NITS：确认滚动加载边界（`fillDrawerViewport` 40 次上界 + `appendDrawerTurns` 返 false 双保险）、XSS（所有 sink 都过 `escapeHtml`）、CSS（`.t-chip` 全局无旧定义、`.rank-label`/`.nm` 的 `min-width:0` 让省略号仍生效）均无问题；major 指出失败路径没护栏 ⇒ 请求前归零 state、`catch` 也判 `drawerReqId`、打开时清掉旧计数。用 `page.route` 把新会话的响应改成 500 复现：旧实现停在「加载失败：boom」但计数仍是旧会话的 `已显示 50 / 995 条`（新实现清空）；`restored identical: True`。
+- 2026-11-26 增量复审（只看 `dbdc8eb`）PASS WITH NITS，并确认前面两轮的修复没引入新问题（`#drawer-turns-hint` 是 `#drawer-turns` 的兄弟节点，重写占位不会毁掉提示；加载中 / 失败时滚动走 `from=to=0` 直接返回 false）；另用不改文件的变异反证确认排序用例有牙。按 nit 删掉恒等于 `turns.length` 的 `state.drawerTurnTotal`，spec 两处措辞补齐。

@@ -121,7 +121,6 @@
     roots: null,
     drawerTurns: [],
     drawerShown: 0,
-    drawerTurnTotal: 0,
     drawerReqId: 0,
   };
 
@@ -2085,7 +2084,7 @@
   function drawerTurnsHint() {
     const hint = $("#drawer-turns-hint");
     if (!hint) return;
-    const total = state.drawerTurnTotal;
+    const total = state.drawerTurns.length;
     if (!total) {
       hint.textContent = "";
       return;
@@ -2195,7 +2194,6 @@
     const reqId = ++state.drawerReqId;
     state.drawerTurns = [];
     state.drawerShown = 0;
-    state.drawerTurnTotal = 0;
     const title = $("#drawer-title");
     const sub = $("#drawer-sub");
     const kpis = $("#drawer-kpis");
@@ -2266,8 +2264,6 @@
       if (turns) {
         const all = d.turns || [];
         state.drawerTurns = all.slice().reverse(); // 最新在上
-        state.drawerTurnTotal = state.drawerTurns.length;
-        state.drawerShown = 0;
         renderDrawerTurns();
       }
     } catch (err) {
@@ -2280,7 +2276,6 @@
     state.drawerReqId += 1; // 丢掉在途的会话响应
     state.drawerTurns = [];
     state.drawerShown = 0;
-    state.drawerTurnTotal = 0;
     const drawer = $("#drawer");
     const backdrop = $("#drawer-backdrop");
     drawer?.classList.remove("open");
