@@ -92,8 +92,13 @@ def cache_get(key: str) -> Optional[Any]:
 
 
 def cache_set(key: str, val: Any) -> None:
+    now = time.time()
     with _CACHE_LOCK:
-        _CACHE[key] = (time.time(), val)
+        # 过期条目只会在被再次读取时才 pop，没人读就会一直占内存
+        # （会话明细现在含全部 turns，单条可达几百 KB）
+        for k in [k for k, (ts, _) in _CACHE.items() if now - ts > CACHE_TTL]:
+            _CACHE.pop(k, None)
+        _CACHE[key] = (now, val)
 
 
 def cache_clear() -> None:

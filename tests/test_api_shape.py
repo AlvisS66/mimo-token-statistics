@@ -701,6 +701,14 @@ class HygieneTest(FixtureMixin, unittest.TestCase):
         self.assertFalse("mktemp(" in src, "server.py 不应再使用已废弃的 tempfile.mktemp")
         self.assertFalse(hasattr(server, "_parse_message_rows"), "_parse_message_rows 为死代码，应已删除")
 
+    def test_cache_set_purges_expired_entries(self):
+        """过期的会话明细（现在含全部 turns，单条可达几百 KB）不能一直留在内存里。"""
+        server.cache_set("sess:gone", {"turns": ["x"] * 10})
+        server._CACHE["sess:gone"] = (time.time() - server.CACHE_TTL - 1, {"turns": []})
+        server.cache_set("fresh", 1)
+        self.assertNotIn("sess:gone", server._CACHE)
+        self.assertIn("fresh", server._CACHE)
+
     def test_csv_rows_carry_agent(self):
         rows = list(csv.reader(io.StringIO(server.export_csv("7"))))
         self.assertTrue(all(len(r) == len(CSV_HEADER) for r in rows))
