@@ -705,6 +705,9 @@ def aggregate(range_key: str) -> Dict[str, Any]:
                 "top_sessions": top_sess[:8],
             }
         )
+    max_model = by_model[0]["tokens"] if by_model else 1
+    for m in by_model:
+        m["pct"] = round(m["tokens"] / max_model * 100) if max_model else 0
 
     by_session = []
     for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"])[:50]:
@@ -1680,6 +1683,9 @@ def aggregate_dates_ranks(dates: List[str]) -> Dict[str, Any]:
                 "top_sessions": top_sess[:8],
             }
         )
+    max_model = by_model[0]["tokens"] if by_model else 1
+    for m in by_model:
+        m["pct"] = round(m["tokens"] / max_model * 100) if max_model else 0
 
     by_session = []
     for sid, s in sorted(sess_agg.items(), key=lambda x: -x[1]["tokens"])[:50]:

@@ -199,6 +199,18 @@ class ApiShapeTest(FixtureMixin, unittest.TestCase):
         self.assertEqual(rows[0], CSV_HEADER)
         self.assertEqual(len(rows) - 1, 4)  # 7 天内 4 条有效 assistant
 
+    def test_rank_pct_relative_to_max(self):
+        agg = server.aggregate("7")
+        for key in ("by_model", "by_project", "by_session"):
+            self.assertEqual(agg[key][0]["pct"], 100, key)
+        # 第二名相对最大值而非总量：ses_child 3030 / ses_root 9070 = 33%，share 为 25%
+        self.assertEqual(agg["by_session"][1]["pct"], 33)
+        self.assertEqual(agg["by_session"][1]["share"], 25.0)
+        self.assertEqual(server.aggregate_agents("7")["by_agent"][0]["pct"], 100)
+        self.assertEqual(server.sessions_by_root("7")["by_root"][0]["pct"], 100)
+        # 选中日期模式下的 by_model（经 /api/days-hourly）同样要带 pct
+        self.assertEqual(server.aggregate_dates_ranks([self.recent_day])["by_model"][0]["pct"], 100)
+
 
 class ParseTokensTest(FixtureMixin, unittest.TestCase):
     def test_user_role_ignored(self):

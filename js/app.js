@@ -1172,7 +1172,7 @@
         return rankRow({
           name: m.model,
           meta: `${m.fmt} · ${formatShare(m.share)} · 命中 ${m.cache_hit}%`,
-          pct: m.share,
+          pct: m.pct,
           sub: `${m.turns} 次/${m.avg_fmt}`,
           fillClass: `model-${i % 4}`,
           id: m.model,
@@ -1234,7 +1234,7 @@
         return rankRow({
           name: p.name,
           meta: `${p.fmt} · ${formatShare(p.share)} · 命中 ${p.cache_hit}%`,
-          pct: p.share,
+          pct: p.pct,
           sub: `${p.sessions} 会话 · ${p.turns} 轮${p.path ? " · " + shortPath(p.path) : ""}`,
           id: p.name,
           kind: "project",
@@ -1420,7 +1420,7 @@
           <td class="num tok-col" style="color:var(--text);font-weight:600">${s.fmt}</td>
           <td class="bar-col">
             <div class="share-cell">
-              <div class="mini-bar"><i style="width:${Math.min(100, Math.max(s.share > 0 ? 2 : 0, s.share || 0))}%"></i></div>
+              <div class="mini-bar"><i style="width:${Math.min(100, Math.max(s.pct > 0 ? 2 : 0, s.pct || 0))}%"></i></div>
               <span class="share-num">${s.share ?? 0}%</span>
             </div>
           </td>
@@ -1519,7 +1519,7 @@
         return rankRow({
           name: a.agent,
           meta: `${a.fmt} · ${formatShare(a.share)} · 命中 ${a.cache_hit}%`,
-          pct: a.share,
+          pct: a.pct,
           sub: `${exact(a.turns)} 次/${a.avg_fmt} · ${a.sessions} 会话 · ${a.last_label || "—"}`,
           fillClass: `model-${i % 4}`,
           id: a.agent,
@@ -1726,7 +1726,7 @@
           <td class="num tok-col" style="color:var(--text);font-weight:600">${r.fmt}</td>
           <td class="bar-col">
             <div class="share-cell">
-              <div class="mini-bar"><i style="width:${Math.min(100, Math.max(r.share > 0 ? 2 : 0, r.share || 0))}%"></i></div>
+              <div class="mini-bar"><i style="width:${Math.min(100, Math.max(r.pct > 0 ? 2 : 0, r.pct || 0))}%"></i></div>
               <span class="share-num">${r.share ?? 0}%</span>
             </div>
           </td>
