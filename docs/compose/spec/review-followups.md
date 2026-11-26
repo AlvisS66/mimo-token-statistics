@@ -61,6 +61,10 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 - 删除未引用的 `_parse_message_rows` 与 `aggregate()` 中的空 `pass` 块。
 - `_first_round_bucket` 改为先取整再分桶：命中率取整为 0 即 `zero`，与 README 口径一致；签名简化为 `_first_round_bucket(hit)`。
 
+### S2.7 版本与发布说明
+
+Implement 完成后由用户确认追加（spec 原先未含，但项目惯例要求接口变更同步升版本）。版本串升为 `MiMoTokenStats/1.0.3`（`Handler.server_version`，即 `Server` 响应头）；补 `RELEASE_NOTES_v1.0.3.md`，沿用既有格式归纳本次全部接口变更。
+
 ## [S3] Out of Scope
 
 - 密码持久化（需单独决定存储位置与哈希方案）。
@@ -80,6 +84,7 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 - [x] T6: 三接口加 `dates` 参数与 `select_items()` helper — acceptance: 测试断言 `aggregate_agents(range, dates=[某天]).totals.tokens` 等于 fixture 中该日条目之和，且三个响应均含 `dates` 字段 (covers: S2.1) (depends: T2)
 - [x] T7: 前端 `loadDimensions` 带 `dates`、副标题用 `selectionLabel`、`closeDayDetail` 回区间 — acceptance: 浏览器选中一天后三面板副标题显示该日期，取消后恢复区间标签 (covers: S2.1) (depends: T6)
 - [x] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
+- [x] T9: 版本串升 `1.0.3` + `RELEASE_NOTES_v1.0.3.md` — acceptance: `server.py` 中不再出现 `1.0.2`；发布说明覆盖本次全部接口变更 (covers: S2.7) (depends: T8)
 
 ## Journey log
 
@@ -100,3 +105,4 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
   - 验收读数：区间「近 7 天 · 首轮 96 条 · 19 个根会话」→ 选中 11-26「2026-11-26 · 首轮 11 条 · 6 个根会话」→ 取消后与初始逐字一致；三个维度接口的请求均带 `dates=`；控制台 0 报错。
   - 工具层踩坑（已绕过，见项目 MEMORY）：`npx` 在本机解析到 `npx.ps1`，它在 `-Command` 路径下会重新解析调用处的源码文本来拼参数，参数是变量或 `@args` 展开时 CLI 一个参数都收不到，须改用 `npx.cmd`；`run-code` 需要传函数 `async (page) => { … }`，复杂片段用 `--filename` 落文件以避开 `cmd.exe` 转义。
 - **T8**：README API 表三行加 `dates`，表后补一段三个接口共用的口径说明（给出时忽略 `range`、最多 32 个、回显 `dates`、格式错误 400、首轮口径不变）。
+- **T9**：Implement 完成后由用户确认追加（spec 原先未含）。版本串只有 `Handler.server_version` 一处；发布说明如实把首轮分桶写成修复——v1.0.2 的说明已经写了「先取整再分桶」，但代码到本版才真正做到。运行时实测 `Server` 响应头为 `MiMoTokenStats/1.0.3`。
