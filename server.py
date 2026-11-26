@@ -440,14 +440,7 @@ def aggregate(range_key: str) -> Dict[str, Any]:
     today_str = now.strftime("%Y-%m-%d")
 
     # range cutoff for KPI / tables / hourly
-    if days is None:
-        range_since = 0
-    elif (range_key or "").lower() in ("today", "1"):
-        local = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        range_since = int(local.timestamp() * 1000)
-    else:
-        range_since = int((time.time() - days * 86400) * 1000)
-
+    range_since = range_since_ms(range_key)
     items = [it for it in items_all if it["time"] >= range_since] if range_since else list(items_all)
 
     # chart / heatmap day list
