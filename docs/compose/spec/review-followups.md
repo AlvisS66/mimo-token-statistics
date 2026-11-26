@@ -1,6 +1,6 @@
 ---
 feature: review-followups
-status: in-progress
+status: delivered
 updated: 2026-11-26
 source: fix/review-followups
 ---
@@ -8,7 +8,29 @@ source: fix/review-followups
 # 审查后续修复：日历联动、条宽、安全卫生与回归测试
 
 ## Report
-[Not finalized yet]
+
+**What was built** — v1.0.2 复审的后续，在 `main`（v1.0.2）之上交付 v1.0.3：
+
+- **日历联动**：Agent 用量 / 首轮命中 / 会话归并三个面板跟随热力图选中的日期。三个维度接口加可选 `dates`（给出时忽略 `range`，最多 32 个，格式错误回 400），首轮口径不变——`dates` 只筛首轮发生的时间；副标题跟随实际展示的数据；日期模式下当前 agent 当天没有数据时保留筛选并标注「所选日期无数据」（S2.1、S2.10）。
+- **口径与安全**：五处排行条宽改用 `pct`；首轮分桶先取整再判；`aggregate` 窗口起点复用 `range_since_ms`；静态路由按路径段判界且只放行 `assets/`、`css/`、`js/`；去掉 CORS 头与 `OPTIONS`；`mktemp` 换 `NamedTemporaryFile`；CSV 补 `agent` 列；会话归并表的子会话列改为数量；删两处死代码（S2.2–S2.6、S2.8）。
+- **加载竞态**：维度响应按 `dimsReqId`、首轮响应按请求口径（范围 / 日期 / agent）丢弃过期结果；同一窗口的维度加载共用一次请求（S2.9、S2.11）。
+- **版本与文档**：版本串升到 `MiMoTokenStats/1.0.3`，补 `RELEASE_NOTES_v1.0.3.md`，README 的 API 表补 `dates`（S2.7）。
+- **回归测试**：新增 `tests/test_api_shape.py`（44 条，标准库 `unittest`，临时 fixture 库），锁定接口形状、首轮口径、`dates` 筛选与缓存隔离、缓存键不可伪造、静态文件目录白名单、`days-hourly` 的日期上限（S2.3）。
+- 两轮独立评审均 PASS（无 critical、无 major），跟进与未采纳项记在 Journey log。
+
+**Verification** —
+
+- `python -m unittest discover -s tests`：Ran 44 tests，OK（最终提交上）。
+- `python -m py_compile server.py`、`node --check js/app.js`：通过。
+- 有头浏览器端到端（真实库只读，`server.py --no-auth --host 127.0.0.1 --port 8798`）。每项都先在改动前的代码上跑出问题，改完后用同一个脚本复跑通过：
+  - 日历联动：选中 2026-11-26 后三面板副标题为该日期，取消后与初始逐字一致；11-25 的响应拖慢 1.5 s、先点 11-25 再点 11-26，三面板停在 11-26。
+  - 三个维度接口的请求被掐断时，副标题留在区间标签。
+  - agent 下拉连改（先发的响应拖慢 1.5 s）：表格停在最后选的 agent；维度加载卡在 `/api/agents` 时切换，首个新口径的响应到达即更新表格。
+  - 选 `checkpoint-writer-1` 再点 2026-11-23（当天只有 `main` 有数据）：筛选保留并带标注，取消日期后筛选仍在。
+  - 选中日期后一次刷新，`/api/agents` 发 1 次（改动前 2 次）。
+  - 样式表与脚本正常加载，控制台 error 0 条；`Server` 响应头为 `MiMoTokenStats/1.0.3`。
+- 回归测试的区分度用实测对照：`/css/../server.py` 在旧实现上回 200；缓存键伪造用例先红后绿；`days-hourly` 上限用例对 `e07866a` 的实现失败、对最终实现通过。
+- 未覆盖：只在 Windows + Python 3.14.3 上验证，发布说明写的「Python 3.9+」未实测。
 
 ## [S1] Problem
 
