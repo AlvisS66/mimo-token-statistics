@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -65,7 +66,7 @@ EXPECTED_TOTALS_KEYS = {
 
 CSV_HEADER = [
     "time", "session_id", "title", "project", "directory", "model",
-    "input", "output", "reasoning", "cache_read", "cache_write", "total",
+    "input", "output", "reasoning", "cache_read", "cache_write", "total", "agent",
 ]
 
 
@@ -361,6 +362,83 @@ class HttpHeaderTest(FixtureMixin, unittest.TestCase):
             server.Handler.log_message = quiet
             httpd.shutdown()
             httpd.server_close()
+
+
+class FirstRoundBucketTest(unittest.TestCase):
+    """先取整再分桶：显示 0% 的一定落在 0% 桶（README 口径）。"""
+
+    def test_boundaries(self):
+        b = server._first_round_bucket
+        self.assertEqual([b(0), b(1), b(49), b(50), b(89), b(90), b(100)], ["zero", "low", "low", "mid", "mid", "high", "high"])
+
+    def test_tiny_nonzero_read_rounds_to_zero_bucket(self):
+        # 400 / 100000 = 0.4% → 取整为 0 → 必须进 zero 桶，而不是 low
+        hit = server.cache_hit_rate(400, 0, 99_600)
+        self.assertEqual(hit, 0)
+        self.assertEqual(server._first_round_bucket(hit), "zero")
+
+
+class HygieneTest(FixtureMixin, unittest.TestCase):
+    def test_no_dead_code_or_deprecated_api(self):
+        src = Path(server.__file__).read_text(encoding="utf-8")
+        self.assertFalse("mktemp(" in src, "server.py 不应再使用已废弃的 tempfile.mktemp")
+        self.assertFalse(hasattr(server, "_parse_message_rows"), "_parse_message_rows 为死代码，应已删除")
+
+    def test_csv_rows_carry_agent(self):
+        rows = list(csv.reader(io.StringIO(server.export_csv("7"))))
+        self.assertTrue(all(len(r) == len(CSV_HEADER) for r in rows))
+        self.assertEqual({r[-1] for r in rows[1:]}, {"main", "general-1", "checkpoint-writer-1"})
+
+
+class QuotaTempFileTest(unittest.TestCase):
+    """get_user_quota 的 Cookie 临时副本：无有效 SSO 时不发网络请求，且临时文件必被清理。"""
+
+    def _run(self, fake: Path, fail_connect: bool = False) -> Dict[str, Any]:
+        created = []
+        real_ntf = tempfile.NamedTemporaryFile
+        real_opener = urllib.request.urlopen
+        real_connect = sqlite3.connect
+
+        def spy(*a, **k):
+            fh = real_ntf(*a, **k)
+            created.append(fh.name)
+            return fh
+
+        def boom(*a, **k):
+            raise RuntimeError("connect exploded")
+
+        tempfile.NamedTemporaryFile = spy
+        urllib.request.urlopen = lambda *a, **k: self.fail("不应发起网络请求")
+        if fail_connect:
+            sqlite3.connect = boom
+        saved = server.COOKIE_CANDIDATES
+        server.COOKIE_CANDIDATES = [fake]
+        try:
+            res = server.get_user_quota()
+        finally:
+            server.COOKIE_CANDIDATES = saved
+            tempfile.NamedTemporaryFile = real_ntf
+            urllib.request.urlopen = real_opener
+            sqlite3.connect = real_connect
+        self.assertEqual(len(created), 1)
+        self.assertFalse(Path(created[0]).exists(), "临时 Cookie 副本未被清理")
+        return res
+
+    def test_no_sso_returns_before_network_and_cleans_up(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / "Cookies"
+            conn = sqlite3.connect(fake)
+            conn.execute("CREATE TABLE cookies (name TEXT, value TEXT)")
+            conn.commit()
+            conn.close()
+            self.assertEqual(self._run(fake)["reason"], "no-sso")
+
+    def test_failure_path_also_cleans_up(self):
+        # 副本已落盘、随后读库失败：旧实现在 except 里直接 return，跳过 unlink
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / "Cookies"
+            fake.write_bytes(b"")
+            self.assertEqual(self._run(fake, fail_connect=True)["reason"], "cookie-read-failed")
 
 
 if __name__ == "__main__":

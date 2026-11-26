@@ -72,14 +72,21 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 
 ## Tasks
 
-- [ ] T1: 建测试骨架——`tests/test_api_shape.py`、最小 fixture DB、对当前代码的键集合断言 — acceptance: `python -m unittest discover -s tests -v` 在未改源码时全绿；断言覆盖六个接口函数的顶层与 `totals` 键集合 (covers: S2.3)
-- [ ] T2: `aggregate()` 窗口起点改用 `range_since_ms()` — acceptance: `aggregate` 函数体不再含 `replace(hour=0` 分支；测试断言 `range_since_ms("today")` 等于本地零点 (covers: S2.4) (depends: T1)
-- [ ] T3: `by_model` 加 `pct`，前端五处条宽改 `pct` — acceptance: 测试断言 `by_model[0].pct == 100`；五个渲染函数中条宽表达式均引用 `pct` (covers: S2.2) (depends: T1)
-- [ ] T4: 抽 `_resolve_static()` + `is_relative_to`，删 ACAO 头与 `do_OPTIONS` — acceptance: 测试断言 `../server.py` 解析为 `None`、`css/style.css` 正常；`server.py` 中不再出现 `Access-Control-Allow-Origin` (covers: S2.5) (depends: T1)
-- [ ] T5: 零散修复六项 — acceptance: 测试断言 `export_csv` 表头末列为 `agent`、`_first_round_bucket(0) == "zero"`；`server.py` 中不再出现 `mktemp` 与 `_parse_message_rows`；`renderRoots` 子会话列引用 `children` (covers: S2.6) (depends: T1)
+- [x] T1: 建测试骨架——`tests/test_api_shape.py`、最小 fixture DB、对当前代码的键集合断言 — acceptance: `python -m unittest discover -s tests -v` 在未改源码时全绿；断言覆盖六个接口函数的顶层与 `totals` 键集合 (covers: S2.3)
+- [x] T2: `aggregate()` 窗口起点改用 `range_since_ms()` — acceptance: `aggregate` 函数体不再含 `replace(hour=0` 分支；测试断言 `range_since_ms("today")` 等于本地零点 (covers: S2.4) (depends: T1)
+- [x] T3: `by_model` 加 `pct`，前端五处条宽改 `pct` — acceptance: 测试断言 `by_model[0].pct == 100`；五个渲染函数中条宽表达式均引用 `pct` (covers: S2.2) (depends: T1)
+- [x] T4: 抽 `_resolve_static()` + `is_relative_to`，删 ACAO 头与 `do_OPTIONS` — acceptance: 测试断言 `../server.py` 解析为 `None`、`css/style.css` 正常；`server.py` 中不再出现 `Access-Control-Allow-Origin` (covers: S2.5) (depends: T1)
+- [x] T5: 零散修复六项 — acceptance: 测试断言 `export_csv` 表头末列为 `agent`、`_first_round_bucket(0) == "zero"`；`server.py` 中不再出现 `mktemp` 与 `_parse_message_rows`；`renderRoots` 子会话列引用 `children` (covers: S2.6) (depends: T1)
 - [ ] T6: 三接口加 `dates` 参数与 `select_items()` helper — acceptance: 测试断言 `aggregate_agents(range, dates=[某天]).totals.tokens` 等于 fixture 中该日条目之和，且三个响应均含 `dates` 字段 (covers: S2.1) (depends: T2)
 - [ ] T7: 前端 `loadDimensions` 带 `dates`、副标题用 `selectionLabel`、`closeDayDetail` 回区间 — acceptance: 浏览器选中一天后三面板副标题显示该日期，取消后恢复区间标签 (covers: S2.1) (depends: T6)
 - [ ] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 
 ## Journey log
-None
+
+- **T1 `6f052de`**：19 条键集合断言在未改源码时一次通过。唯一修正是 `_root_session_id` 的环用例——`a↔b` 环里「根」没有良定义，契约收窄为「必终止且只返回环内节点」。
+- **T2 `00b5b07`**：`aggregate()` 的内联窗口分支替换为 `range_since_ms()`；`replace(hour=0` 剩余 4 处均在 `aggregate` 之外。
+- **T3 `0afcf64`**：日期模式下 `renderModels` 吃的是 `aggregate_dates_ranks` 的 `by_model`，所以服务端改了两处（`aggregate()` 与 `aggregate_dates_ranks`）而非一处，否则日期模式下条宽为 NaN。
+  - 范围外遗留：`pack_mstat`（`server.py:237`）不返回 `pct`，经它供数的两条模型条仍用 `share`——热力图日详情面板（`js/app.js:623`）与会话抽屉（`js/app.js:1822`）。修它需要给 `pack_mstat` 加 `pct`，会同时影响 `get_day_detail` 与 `session_detail` 两个响应，未纳入本次范围。
+- **T4 `fab0403`**：HTTP 层「同名前缀兄弟目录」用例最初少写一层 `..`，路径实际落在根目录内，回 404 才是正确行为；修正后新旧实现才有区分度（旧 404 / 新 403）。
+- **T5**：六项全部落地，测试 30 条。
+  - `mktemp` 的失败路径用例第一版把失败注入在「复制阶段」，实测**区分不了新旧实现**：`mktemp` 只给文件名、不建文件，复制一失败磁盘上什么都没有，新旧泄漏数均为 0。改为「副本落盘后读库失败」后，旧实现泄漏 1 个、新实现 0 个，用例才真正锁住这次修复。

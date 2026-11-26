@@ -290,27 +290,6 @@ def _load_session_meta() -> Dict[str, Any]:
         conn.close()
 
 
-def _parse_message_rows(rows) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    for r in rows:
-        parsed = parse_tokens(r["data"])
-        if not parsed:
-            continue
-        tc = parsed["msg_time"] or int(r["time_created"] or 0)
-        sid = r["session_id"] or ""
-        items.append(
-            {
-                "session_id": sid,
-                "title": "",
-                "directory": "",
-                "project_name": "",
-                "time": tc,
-                **parsed,
-            }
-        )
-    return items
-
-
 def load_full_items(force: bool = False) -> List[Dict[str, Any]]:
     """全量 assistant token 行（带内存缓存，供各 range 复用）。"""
     global _FULL_ITEMS, _FULL_META, _FULL_FIRST, _FULL_PENDING, _FULL_ITEMS_AT
@@ -610,8 +589,6 @@ def aggregate(range_key: str) -> Dict[str, Any]:
             s["cache_write"] += it["cache_write"]
             s["last"] = max(s["last"], it["time"])
             s["models"][it["model"]] += t
-            if it["title"] and (not s["title"] or len(it["title"]) > len(s["title"])):
-                pass
 
         pkey = it["project_name"] or "(未分配目录)"
         p = proj_agg.setdefault(
@@ -1072,8 +1049,9 @@ FIRST_ROUND_BUCKETS = (
 )
 
 
-def _first_round_bucket(cr: int, hit: int, denom: int) -> str:
-    if cr <= 0 or denom <= 0:
+def _first_round_bucket(hit: int) -> str:
+    """先取整再分桶：显示 0% 的一定落在 0% 桶，与 README 口径一致。"""
+    if hit <= 0:
         return "zero"
     if hit < 50:
         return "low"
@@ -1125,7 +1103,7 @@ def first_round_report(range_key: str, agent_filter: str = "") -> Dict[str, Any]
             "cache_write": it["cache_write"],
             "denom": denom,
             "hit": rate,
-            "bucket": _first_round_bucket(it["cache_read"], rate, denom),
+            "bucket": _first_round_bucket(rate),
         }
 
     rows = [build_row(it) for it in rounds]
@@ -1905,6 +1883,7 @@ def export_csv(range_key: str) -> str:
             "cache_read",
             "cache_write",
             "total",
+            "agent",
         ]
     )
     for it in items:
@@ -1923,6 +1902,7 @@ def export_csv(range_key: str) -> str:
                 it["cache_read"],
                 it["cache_write"],
                 it["total"],
+                it["agent"],
             ]
         )
     return buf.getvalue()
@@ -1940,12 +1920,13 @@ def get_user_quota() -> Dict[str, Any]:
         return {"ok": False, "reason": "no-cookie-db", "percent": None, "resetDate": None}
 
     pass_token = user_id = None
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as fh:
+        tmp = fh.name
     try:
-        tmp = tempfile.mktemp(suffix=".db")
         shutil.copy2(str(cookie_path), tmp)
         conn = sqlite3.connect(tmp, timeout=3)
-        c = conn.cursor()
         try:
+            c = conn.cursor()
             c.execute("SELECT name, value FROM cookies WHERE name IN ('passToken','userId','cUserId')")
             for name, val in c.fetchall():
                 if name == "passToken":
@@ -1954,10 +1935,15 @@ def get_user_quota() -> Dict[str, Any]:
                     user_id = val
         except Exception:
             pass
-        conn.close()
-        os.unlink(tmp)
+        finally:
+            conn.close()
     except Exception:
         return {"ok": False, "reason": "cookie-read-failed", "percent": None, "resetDate": None}
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
     if not pass_token or not user_id:
         return {"ok": False, "reason": "no-sso", "percent": None, "resetDate": None}

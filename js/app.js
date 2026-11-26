@@ -81,7 +81,7 @@
     hourlySig: "",
     openModel: sessionStorage.getItem("mimo-ts-open-model") || null,
     openProject: sessionStorage.getItem("mimo-ts-open-project") || null,
-    openAgent: null,
+    openAgent: sessionStorage.getItem("mimo-ts-open-agent") || null,
     // 当前列表展示所用的数据源（区间 or 选中日期）
     rankModels: null,
     rankProjects: null,
@@ -104,6 +104,8 @@
     else sessionStorage.removeItem("mimo-ts-open-model");
     if (state.openProject) sessionStorage.setItem("mimo-ts-open-project", state.openProject);
     else sessionStorage.removeItem("mimo-ts-open-project");
+    if (state.openAgent) sessionStorage.setItem("mimo-ts-open-agent", state.openAgent);
+    else sessionStorage.removeItem("mimo-ts-open-agent");
   }
 
   function setOpenModel(name) {
@@ -113,6 +115,11 @@
 
   function setOpenProject(name) {
     state.openProject = name;
+    persistOpenRanks();
+  }
+
+  function setOpenAgent(name) {
+    state.openAgent = name;
     persistOpenRanks();
   }
 
@@ -1534,11 +1541,11 @@
       const agent = row.dataset.name;
       const toggle = (e) => {
         if (e.target?.closest?.("[data-collapse]")) {
-          state.openAgent = null;
+          setOpenAgent(null);
           renderAgents();
           return;
         }
-        state.openAgent = state.openAgent === agent ? null : agent;
+        setOpenAgent(state.openAgent === agent ? null : agent);
         renderAgents();
       };
       row.addEventListener("click", toggle);
@@ -1722,7 +1729,7 @@
           <td class="proj-col" title="${escapeHtml(r.directory || "")}">${escapeHtml(r.project_name || "—")}</td>
           <td class="num">${exact(r.turns)}</td>
           <td class="num">${r.cache_hit ?? 0}%</td>
-          <td class="num">${r.merged_sessions ?? 1}</td>
+          <td class="num">${r.children?.length ?? 0}</td>
           <td class="num tok-col" style="color:var(--text);font-weight:600">${r.fmt}</td>
           <td class="bar-col">
             <div class="share-cell">
@@ -1916,6 +1923,7 @@
     localStorage.setItem("mimo-ts-range", range);
     setOpenModel(null);
     setOpenProject(null);
+    setOpenAgent(null);
     // 切范围时清掉日历选中，避免时段活跃在「区间汇总 / 单日」之间来回闪
     state.selectedDayDates = [];
     state.selectedHours = [];
@@ -2317,7 +2325,7 @@
           renderModels(currentRankModels());
           renderProjects(currentRankProjects());
         } else if (state.openAgent) {
-          state.openAgent = null;
+          setOpenAgent(null);
           renderAgents();
         } else closeDayDetail();
       }
