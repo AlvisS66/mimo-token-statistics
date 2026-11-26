@@ -73,11 +73,17 @@ CSV_HEADER = [
 ]
 
 
-def _assistant(created_ms, input_t, output_t, cache_read, cache_write=0, total=None, model="m-test"):
+def _assistant(created_ms, input_t, output_t, cache_read, cache_write=0, total=None, model="m-test",
+               provider=None, variant=None):
     tok = {"input": input_t, "output": output_t, "cache": {"read": cache_read, "write": cache_write}}
     if total is not None:
         tok["total"] = total
-    return json.dumps({"role": "assistant", "modelID": model, "time": {"created": created_ms}, "tokens": tok})
+    msg = {"role": "assistant", "modelID": model, "time": {"created": created_ms}, "tokens": tok}
+    if provider is not None:
+        msg["providerID"] = provider
+    if variant is not None:
+        msg["variant"] = variant
+    return json.dumps(msg)
 
 
 def _zero_assistant(created_ms):
@@ -125,7 +131,8 @@ class FixtureMixin:
             # ses_root / main：user、全 0 壳子、首轮（命中 47%）、第二轮（命中 90%）
             ("m01", "ses_root", "main",     t_recent - 5000, _user(t_recent - 5000)),
             ("m02", "ses_root", "main",     t_recent - 4000, _zero_assistant(t_recent - 4000)),
-            ("m03", "ses_root", "main",     t_recent - 3000, _assistant(t_recent - 3000, 1000, 100, 900)),
+            ("m03", "ses_root", "main",     t_recent - 3000, _assistant(t_recent - 3000, 1000, 100, 900,
+                                                                       provider="prov-a", variant="max")),
             ("m04", "ses_root", "main",     t_recent - 2000, _assistant(t_recent - 2000, 500, 50, 4500)),
             # ses_root / general-1：首轮零命中
             ("m05", "ses_root", "general-1", t_recent - 1000, _assistant(t_recent - 1000, 2000, 20, 0)),
@@ -249,6 +256,21 @@ class ParseTokensTest(FixtureMixin, unittest.TestCase):
         d = json.loads(_assistant(1, 1, 1, 0))
         d.pop("modelID")
         self.assertEqual(server.parse_tokens(json.dumps(d))["model"], "unknown")
+
+
+class SessionDetailTurnTest(FixtureMixin, unittest.TestCase):
+    """每条请求要带服务商与思考强度：抽屉卡片按它们显示 provider / variant。"""
+
+    def test_turns_carry_provider_and_variant(self):
+        turns = {t["time"]: t for t in server.session_detail("ses_root")["turns"]}
+        for t in turns.values():
+            self.assertIn("provider", t, t["time"])
+            self.assertIn("variant", t, t["time"])
+        # m03 两个字段都有，m04 一个都没有
+        self.assertEqual(turns[self.t_recent - 3000]["provider"], "prov-a")
+        self.assertEqual(turns[self.t_recent - 3000]["variant"], "max")
+        self.assertIsNone(turns[self.t_recent - 2000]["provider"])
+        self.assertIsNone(turns[self.t_recent - 2000]["variant"])
 
 
 class RangeWindowTest(FixtureMixin, unittest.TestCase):

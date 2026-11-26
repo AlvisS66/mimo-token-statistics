@@ -129,7 +129,7 @@ def open_db() -> sqlite3.Connection:
     return conn
 
 
-def parse_tokens(raw: Optional[str], keep_zero: bool = False) -> Optional[Dict[str, int]]:
+def parse_tokens(raw: Optional[str], keep_zero: bool = False) -> Optional[Dict[str, Any]]:
     """从 message.data 中提取 token 统计；无效消息返回 None。
 
     keep_zero=True 时，assistant 消息即使 token 全 0 也返回（带 zero=True）：
@@ -170,6 +170,8 @@ def parse_tokens(raw: Optional[str], keep_zero: bool = False) -> Optional[Dict[s
         "cache_write": cw,
         "total": total,
         "model": d.get("modelID") or d.get("model") or "unknown",
+        "provider": d.get("providerID") or None,
+        "variant": d.get("variant") or None,
         "msg_time": int((d.get("time") or {}).get("created") or 0),
         "zero": zero,
     }
@@ -1592,6 +1594,8 @@ def session_detail(session_id: str) -> Dict[str, Any]:
                 "time": tc,
                 "time_label": datetime.fromtimestamp(tc / 1000).strftime("%m-%d %H:%M:%S") if tc else "",
                 "model": parsed["model"],
+                "provider": parsed["provider"],
+                "variant": parsed["variant"],
                 **{k: parsed[k] for k in ("input", "output", "reasoning", "cache_read", "cache_write", "total")},
             }
         )
