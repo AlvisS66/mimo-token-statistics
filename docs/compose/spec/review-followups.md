@@ -79,7 +79,7 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
 - [x] T5: 零散修复六项 — acceptance: 测试断言 `export_csv` 表头末列为 `agent`、`_first_round_bucket(0) == "zero"`；`server.py` 中不再出现 `mktemp` 与 `_parse_message_rows`；`renderRoots` 子会话列引用 `children` (covers: S2.6) (depends: T1)
 - [x] T6: 三接口加 `dates` 参数与 `select_items()` helper — acceptance: 测试断言 `aggregate_agents(range, dates=[某天]).totals.tokens` 等于 fixture 中该日条目之和，且三个响应均含 `dates` 字段 (covers: S2.1) (depends: T2)
 - [x] T7: 前端 `loadDimensions` 带 `dates`、副标题用 `selectionLabel`、`closeDayDetail` 回区间 — acceptance: 浏览器选中一天后三面板副标题显示该日期，取消后恢复区间标签 (covers: S2.1) (depends: T6)
-- [ ] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
+- [x] T8: README API 表补 `dates` 参数说明 — acceptance: README 三个接口行均提到 `dates` (depends: T6)
 
 ## Journey log
 
@@ -99,3 +99,4 @@ v1.0.2 代码审查发现六类问题，彼此独立但同属一份审查的后�
   - 超出 spec 字面的一条：给 `loadDimensions` / `loadFirstRound` 加了 `dimsReqId` 守门（与现有 `hourlyReqId` 同一套路）。日历每次点击都会触发一次加载，快速连点时先发的响应后到会把面板覆盖成错的日期；守门让过期响应连 `state` 都不进。验收时用路由把 11-25 的响应延迟 1.5 秒，先点 11-25 再点 11-26，最终三面板停在 11-26，且日志里没有 11-25 的 first-round 请求（过期的那次在第一道守门处就被丢弃）。
   - 验收读数：区间「近 7 天 · 首轮 96 条 · 19 个根会话」→ 选中 11-26「2026-11-26 · 首轮 11 条 · 6 个根会话」→ 取消后与初始逐字一致；三个维度接口的请求均带 `dates=`；控制台 0 报错。
   - 工具层踩坑（已绕过，见项目 MEMORY）：`npx` 在本机解析到 `npx.ps1`，它在 `-Command` 路径下会重新解析调用处的源码文本来拼参数，参数是变量或 `@args` 展开时 CLI 一个参数都收不到，须改用 `npx.cmd`；`run-code` 需要传函数 `async (page) => { … }`，复杂片段用 `--filename` 落文件以避开 `cmd.exe` 转义。
+- **T8**：README API 表三行加 `dates`，表后补一段三个接口共用的口径说明（给出时忽略 `range`、最多 32 个、回显 `dates`、格式错误 400、首轮口径不变）。

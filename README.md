@@ -137,15 +137,17 @@ Windows 可双击 `启动统计服务.bat`；结束时可用 `停止统计服务
 | GET | `/api/day-hourly?date=` | 某日 24 小时分模型（日历联动） |
 | GET | `/api/days-hourly?dates=` | 多日合并小时分布，`dates` 为逗号分隔日期（Shift 多选） |
 | GET | `/api/session?id=` | 单会话明细（最近请求列表） |
-| GET | `/api/agents?range=` | **按 agent 汇总**：用量、命中率、会话数、分模型明细 |
-| GET | `/api/first-round?range=&agent=` | **首轮命中**：分桶（0% / 1–50% / 50–90% / 90–100%）+ 每会话明细 + `pending` 未落盘计数。`agent` 支持前缀（`checkpoint-writer` 可命中 `checkpoint-writer-1`） |
-| GET | `/api/sessions-root?range=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细 |
+| GET | `/api/agents?range=&dates=` | **按 agent 汇总**：用量、命中率、会话数、分模型明细 |
+| GET | `/api/first-round?range=&agent=&dates=` | **首轮命中**：分桶（0% / 1–50% / 50–90% / 90–100%）+ 每会话明细 + `pending` 未落盘计数。`agent` 支持前缀（`checkpoint-writer` 可命中 `checkpoint-writer-1`） |
+| GET | `/api/sessions-root?range=&dates=` | **父子会话归并**：子会话消耗并入根会话，附 `children` 明细 |
 | GET | `/api/export.csv?range=` | 按当前范围导出 CSV |
 | GET | `/api/health` | 健康检查（别名 `/api/status`） |
 | GET | `/api/quota` | 可选：读本机 cookie 查询官方周配额 |
 | GET | `/api/refresh` | 清空聚合缓存与全量 items 内存缓存 |
 
 `/api/overview` 响应中还包含 `weekday_hour`（周几 × 小时）聚合，当前界面未单独渲染，可供二次开发使用。
+
+`/api/agents`、`/api/first-round`、`/api/sessions-root` 都接受可选的 `dates`（逗号分隔 `YYYY-MM-DD`，最多 32 个）：给出时忽略 `range`，按消息的本地日期筛选，响应带 `dates` 字段，格式错误回 400。首轮口径不变——`dates` 只筛首轮发生的时间，不改变哪条是首轮。
 
 ## 项目结构
 
