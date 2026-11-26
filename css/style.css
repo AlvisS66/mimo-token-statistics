@@ -2034,7 +2034,7 @@ html[data-theme="dark"] #btn-theme .ic-moon { display: none; }
   /* 窄屏收紧翻页行，免得「下一页」被挤到单独一行 */
   .table-pager { gap: 8px; }
   .table-pager .btn { padding: 0 8px; }
-  .table-pager .page-num { min-width: 26px; }
+  .table-pager .page-num { padding: 0 6px; min-width: 26px; }
   .top-grid { grid-template-columns: 1fr; }
 
   /* 会话详情 / 设置弹窗：更贴边、更好读 */
