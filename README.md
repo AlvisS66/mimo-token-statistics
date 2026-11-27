@@ -39,7 +39,7 @@ Windows 路径同样为：`C:\Users\<你>\.local\share\mimocode\mimocode.db`
 
 ### 方式一：GitHub Releases（无需安装 Git）
 
-1. 打开 [Releases](https://github.com/b0bcx/mimo-token-statistics/releases) 下载最新 Source code zip
+1. 打开[上游项目的 Releases](https://github.com/b0bcx/mimo-token-statistics/releases) 下载 Source code zip（只有上游发布过 v1.0.0 / v1.0.1，比本仓库的当前版本旧）
 2. 解压后进入目录
 3. 运行：
 
@@ -52,7 +52,7 @@ Windows 可双击 `启动统计服务.bat`。
 ### 方式二：git clone
 
 ```bash
-git clone https://github.com/b0bcx/mimo-token-statistics.git
+git clone https://github.com/AlvisS66/mimo-token-statistics.git
 cd mimo-token-statistics
 
 # 默认 http://0.0.0.0:8765（本机可用 http://127.0.0.1:8765）
