@@ -375,6 +375,21 @@ class ModelProvidersTest(FixtureMixin, unittest.TestCase):
         self.assertIn("prov-a", rows["m-test"]["providers"])
 
 
+class ProviderScopeTest(FixtureMixin, unittest.TestCase):
+    """providers 只加在会话明细与两处 by_model 行上；pack_mstat 被 /api/agents 等复用，不要顺手加进去。"""
+
+    def test_pack_mstat_has_no_providers(self):
+        st = {"tokens": 10, "turns": 1, "input": 5, "output": 5, "reasoning": 0, "cache_read": 0, "cache_write": 0}
+        self.assertNotIn("providers", server.pack_mstat("m-x", st))
+
+    def test_agent_rows_have_no_providers(self):
+        rows = server.aggregate_agents("7")["by_agent"]
+        self.assertTrue(rows, "fixture 里应有 agent 行")
+        self.assertNotIn("providers", rows[0])
+        for model_row in rows[0]["models"]:
+            self.assertNotIn("providers", model_row)
+
+
 class RangeWindowTest(FixtureMixin, unittest.TestCase):
     def test_all_is_zero(self):
         self.assertEqual(server.range_since_ms("all"), 0)

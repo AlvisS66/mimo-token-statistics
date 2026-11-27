@@ -1,7 +1,7 @@
 ---
 feature: session-drawer-scroll
 status: delivered
-updated: 2026-11-26
+updated: 2026-11-27
 source: feat/session-drawer-scroll
 ---
 
@@ -106,3 +106,4 @@ glm-5.4  [kg-newapi]  [思考 max]            23.43万 · 命中 100%
 - 2026-11-26 前端侧独立评审 PASS WITH NITS：确认滚动加载边界（`fillDrawerViewport` 40 次上界 + `appendDrawerTurns` 返 false 双保险）、XSS（所有 sink 都过 `escapeHtml`）、CSS（`.t-chip` 全局无旧定义、`.rank-label`/`.nm` 的 `min-width:0` 让省略号仍生效）均无问题；major 指出失败路径没护栏 ⇒ 请求前归零 state、`catch` 也判 `drawerReqId`、打开时清掉旧计数。用 `page.route` 把新会话的响应改成 500 复现：旧实现停在「加载失败：boom」但计数仍是旧会话的 `已显示 50 / 995 条`（新实现清空）；`restored identical: True`。
 - 2026-11-26 增量复审（只看 `dbdc8eb`）PASS WITH NITS，并确认前面两轮的修复没引入新问题（`#drawer-turns-hint` 是 `#drawer-turns` 的兄弟节点，重写占位不会毁掉提示；加载中 / 失败时滚动走 `from=to=0` 直接返回 false）；另用不改文件的变异反证确认排序用例有牙。按 nit 删掉恒等于 `turns.length` 的 `state.drawerTurnTotal`，spec 两处措辞补齐。
 - 2026-11-26 定稿：status → delivered。9 个提交（`162248c` 服务端字段 / `1494562` 滚动加载与卡片同行 / `2079be7` 版本 1.0.5 / `d1d71b5` 迟到响应守卫 / `773e142` 主面板模型用量服务商 / `00df589` 缓存过期清扫 / `73417cd` 关闭清空状态 / `dbdc8eb` 失败路径守卫与测试补牙 / `b92d267` 去掉冗余字段），72 tests OK，6 套有头场景全绿，三轮独立评审均 PASS（无 critical）。
+- 2026-11-27 交付后补遗：README 的 `/api/overview` 行补 `by_model[].providers` 说明（原只写了 `/api/session` 的 `models[]`）；新增 `ProviderScopeTest` 锁住 `providers` 的作用域——`pack_mstat()` 与 `/api/agents` 的行都不得带该字段（它被首轮、日内分模型复用，顺手加会静默扩散）。原打算给 `fillDrawerViewport()` 加「容器没高度就不追加」的守卫，有头实测否掉了这个前提：抽屉关着时 `.modal-body` 的 `clientHeight` 是 128（`.modal` 用 `visibility: hidden` 隐藏，仍有布局），守卫永不触发 ⇒ 不进代码，避免死代码。74 tests OK。
